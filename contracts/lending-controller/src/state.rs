@@ -107,7 +107,7 @@ impl MarketConfig {
     }
 }
 
-/// Default MarketConfig for XRP (Aave v3-inspired parameters)
+/// Default MarketConfig for XRP
 pub const XRP_MARKET: MarketConfig = MarketConfig {
     ltv: 7500,                  // 75%
     liquidation_threshold: 8000,// 80%

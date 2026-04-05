@@ -6,7 +6,7 @@
 
 ## 1. Executive Summary
 
-An Aave v3-inspired, permissionless lending protocol deployed on XRPL using three upcoming standards:
+A permissionless lending protocol deployed on XRPL using three upcoming standards:
 
 | Standard | Purpose |
 |----------|---------|

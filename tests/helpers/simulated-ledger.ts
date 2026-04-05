@@ -4,7 +4,7 @@
  * Mirrors the Rust contract logic exactly:
  *   - WAD math: wad_mul (rounded half-up), wad_div
  *   - Compound interest: 2-term Taylor series
- *   - Kinked interest rate model (Aave-style)
+ *   - Kinked two-slope interest rate model
  *   - Supply/withdraw, collateral, borrow/repay, liquidation
  *
  * State is stored in the same key format as the on-chain contract so that

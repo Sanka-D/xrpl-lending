@@ -1,4 +1,4 @@
-/// Interest rate model — kinked two-slope curve (Aave v3 style).
+/// Interest rate model — kinked two-slope curve.
 ///
 /// # Arithmetic conventions
 ///

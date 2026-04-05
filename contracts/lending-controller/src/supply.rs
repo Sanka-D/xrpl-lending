@@ -1,6 +1,6 @@
 // Supply (deposit) and withdraw logic
 //
-// Uses Aave-style scaled balances:
+// Uses scaled balances:
 //   scaled_shares = wad_div(amount, supply_index)   on deposit
 //   amount        = wad_mul(shares, supply_index)   on redeem
 //
