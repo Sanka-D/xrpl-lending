@@ -135,38 +135,51 @@ describe("LendingClient address utils", () => {
 // ── buildInvokeTx ─────────────────────────────────────────────────────────────
 
 describe("buildInvokeTx", () => {
-  it("produces Invoke transaction type", () => {
-    const config = {
-      wsUrl: "wss://test",
-      contractAddress: "rContractXXXXXXXXXXXXXXXXXXXXXXXXXXX",
-      wallet: { classicAddress: "rCallerXXXXXXXXXXXXXXXXXXXXXXXXXXX" } as unknown as import("xrpl").Wallet,
-    };
-    const client = new LendingClient(config);
-    const tx = client.buildInvokeTx("supply", new Uint8Array([0x01, 0x02]));
+  const config = {
+    wsUrl: "wss://test",
+    contractAddress: "rContractXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+    wallet: { classicAddress: "rCallerXXXXXXXXXXXXXXXXXXXXXXXXXXX", publicKey: "ED0000", privateKey: undefined } as unknown as import("xrpl").Wallet,
+  };
 
-    expect(tx.TransactionType).toBe("Invoke");
-    expect(tx.Destination).toBe("rContractXXXXXXXXXXXXXXXXXXXXXXXXXXX");
-    expect(Array.isArray(tx.InvokeArgs)).toBe(true);
-  });
-
-  it("HexValue encodes function name + null + args", () => {
-    const config = {
-      wsUrl: "wss://test",
-      contractAddress: "rXXX",
-      wallet: { classicAddress: "rYYY" } as unknown as import("xrpl").Wallet,
-    };
+  it("produces ContractCall transaction type", () => {
     const client = new LendingClient(config);
-    const args = new Uint8Array([0x00, 0xff]);
+    // supply(asset_id: u32, amount: u64) → 12 bytes
+    const args = new Uint8Array([...encodeU32LE(0), ...encodeU64LE(1000000n)]);
     const tx = client.buildInvokeTx("supply", args);
 
-    const invokeArgs = tx.InvokeArgs as Array<{ InvokeArg: { HexValue: string } }>;
-    const hexValue = invokeArgs[0].InvokeArg.HexValue.toLowerCase();
+    expect(tx.TransactionType).toBe("ContractCall");
+    expect(tx.ContractAccount).toBe("rContractXXXXXXXXXXXXXXXXXXXXXXXXXXX");
+  });
 
-    // "supply" in UTF-8 hex = 737570706c79
-    expect(hexValue.startsWith("737570706c79")).toBe(true);
-    // followed by null separator "00"
-    expect(hexValue).toContain("737570706c7900");
-    // followed by args hex "00ff"
-    expect(hexValue.endsWith("00ff")).toBe(true);
+  it("FunctionName is uppercase hex of function name UTF-8", () => {
+    const client = new LendingClient(config);
+    const args = new Uint8Array([...encodeU32LE(0), ...encodeU64LE(0n)]);
+    const tx = client.buildInvokeTx("supply", args);
+
+    // "supply" in UTF-8 hex = 737570706C79 (uppercase)
+    expect(tx.FunctionName).toBe("737570706C79".toUpperCase());
+  });
+
+  it("Parameters typed correctly for supply (UINT32, UINT64)", () => {
+    const client = new LendingClient(config);
+    const args = new Uint8Array([...encodeU32LE(1), ...encodeU64LE(500n)]);
+    const tx = client.buildInvokeTx("supply", args);
+
+    type Param = { Parameter: { ParameterFlag: number; ParameterValue: { type: string; value: string } } };
+    const params = tx.Parameters as Param[];
+    expect(params).toHaveLength(2);
+    expect(params[0]).toMatchObject({ Parameter: { ParameterFlag: 0, ParameterValue: { type: "UINT32", value: "1" } } });
+    expect(params[1]).toMatchObject({ Parameter: { ParameterFlag: 1, ParameterValue: { type: "UINT64", value: "500" } } });
+  });
+
+  it("Parameters typed correctly for set_vault (UINT32 only — caller becomes vault)", () => {
+    const client = new LendingClient(config);
+    const args = encodeU32LE(2);
+    const tx = client.buildInvokeTx("set_vault", args);
+
+    type Param = { Parameter: { ParameterFlag: number; ParameterValue: { type: string; value: string } } };
+    const params = tx.Parameters as Param[];
+    expect(params).toHaveLength(1);
+    expect(params[0]).toMatchObject({ Parameter: { ParameterFlag: 0, ParameterValue: { type: "UINT32", value: "2" } } });
   });
 });

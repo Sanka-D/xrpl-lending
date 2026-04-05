@@ -1,13 +1,16 @@
 /**
  * deploy-vaults.ts
  *
- * Creates 3 single-asset Supply Vaults on XRPL AlphaNet using VaultSet (XLS-65).
- * Each vault is created as a public vault (tfVaultPublic = 0x00000001).
+ * Creates 3 single-asset Supply Vaults on XRPL AlphaNet using VaultCreate (XLS-65).
+ * Each vault is created as a public vault (no tfVaultPrivate flag set).
  *
  * After creation, the VaultID (ledger index) is saved to deployed.json.
  *
  * Usage:
  *   DEPLOYER_SECRET=sXXX RLUSD_ISSUER=rXXX WBTC_ISSUER=rXXX tsx deploy-vaults.ts
+ *
+ * Note: For a full one-shot setup (create vaults + register them in the contract),
+ * use setup-markets.ts instead.
  */
 
 import { Client, Wallet } from "xrpl";
@@ -17,19 +20,15 @@ import {
   extractCreatedNodeIndex, log, die,
 } from "./shared.js";
 
-// tfVaultPublic flag (XLS-65)
-const TF_VAULT_PUBLIC = 0x00000001;
-
 interface VaultAsset {
   currency: string;
   issuer?: string;
 }
 
-interface VaultSetTx {
-  TransactionType: "VaultSet";
+interface VaultCreateTx {
+  TransactionType: "VaultCreate";
   Account: string;
   Asset: VaultAsset | { currency: "XRP" };
-  Flags: number;
   Fee?: string;
 }
 
@@ -41,11 +40,10 @@ async function createVault(
 ): Promise<string> {
   log(`Creating ${label} vault...`);
 
-  const tx: VaultSetTx = {
-    TransactionType: "VaultSet",
+  const tx: VaultCreateTx = {
+    TransactionType: "VaultCreate",
     Account: wallet.classicAddress,
     Asset: asset,
-    Flags: TF_VAULT_PUBLIC,
   };
 
   const result = await client.submitAndWait(

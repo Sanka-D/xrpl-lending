@@ -9,7 +9,7 @@ import { WAD, AssetIndex } from "xrpl-lending-sdk";
 // ── Protocol constants ────────────────────────────────────────────────────────
 
 /** Default XRPL AlphaNet WebSocket URL */
-export const ALPHANET_WSS = "wss://s.devnet.rippletest.net:51233";
+export const ALPHANET_WSS = "wss://alphanet.nerdnest.xyz";
 
 /** DIA oracle constants (mirror of Rust state.rs) */
 export const DIA_ACCOUNT = "rP24Lp7bcUHvEW7T7c8xkxtQKKd9fZyra7";

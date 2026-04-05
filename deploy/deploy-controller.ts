@@ -84,25 +84,15 @@ async function deployContract(
 async function registerVaultAccount(
   lendingClient: LendingClient,
   vaultIndex: number,
-  vaultAddress: string,
 ): Promise<void> {
-  // vault address → 20-byte AccountID
-  const accountId = LendingClient.addressToAccountId(vaultAddress);
-
-  // state key: "vault{i}" (global_key = "glb:vault{i}")
-  const key = globalKey(`vault${vaultIndex}`);
-
-  // We need a special Invoke to write state — this is an admin-only set_vault function.
-  // The contract exposes `set_vault(asset_id: u32, vault_ptr: u32)` for admin setup.
-  // Args: u32LE(vaultIndex) + 20 bytes accountId = 24 bytes total
-  const args = new Uint8Array(24);
+  // set_vault(asset_id: u32) — caller becomes the vault account (write-once)
+  const args = new Uint8Array(4);
   args[0] = vaultIndex & 0xff;
   args[1] = (vaultIndex >> 8) & 0xff;
   args[2] = (vaultIndex >> 16) & 0xff;
   args[3] = (vaultIndex >> 24) & 0xff;
-  args.set(accountId, 4);
 
-  log(`Registering vault ${vaultIndex} account: ${vaultAddress}`);
+  log(`Registering vault ${vaultIndex} (caller = vault account)`);
   const txResult = await lendingClient.submitInvoke("set_vault", args);
 
   if (txResult.engineResult !== "tesSUCCESS") {
@@ -164,9 +154,9 @@ async function main(): Promise<void> {
     (lendingClient as unknown as { xrplClient: Client }).xrplClient = xrplClient; // reuse existing connection
 
     if (vaultXrpAccount && vaultRlusdAccount && vaultWbtcAccount) {
-      await registerVaultAccount(lendingClient, 0, vaultXrpAccount);
-      await registerVaultAccount(lendingClient, 1, vaultRlusdAccount);
-      await registerVaultAccount(lendingClient, 2, vaultWbtcAccount);
+      await registerVaultAccount(lendingClient, 0);
+      await registerVaultAccount(lendingClient, 1);
+      await registerVaultAccount(lendingClient, 2);
     } else {
       log("Skipping vault registration (VAULT_*_ACCOUNT env vars not set).");
     }

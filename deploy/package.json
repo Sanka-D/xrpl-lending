@@ -8,6 +8,7 @@
     "deploy:controller": "tsx deploy-controller.ts",
     "configure:markets": "tsx configure-markets.ts",
     "setup:markets":     "tsx setup-markets.ts",
+    "register:vaults":   "tsx register-vaults.ts",
     "setup:oracle":      "tsx setup-oracle.ts",
     "typecheck":         "tsc --noEmit"
   },

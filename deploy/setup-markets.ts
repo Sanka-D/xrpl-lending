@@ -19,7 +19,7 @@
  *   XRPL_WSS_URL=wss://... — override network (default: alphanet.nerdnest.xyz)
  */
 
-import { Client, Wallet, decodeAccountID } from "xrpl";
+import { Client, Wallet } from "xrpl";
 import type { SubmittableTransaction, TxResponse } from "xrpl";
 import { LendingClient } from "xrpl-lending-sdk";
 import {
@@ -27,7 +27,8 @@ import {
   extractCreatedNodeIndex, log, die,
 } from "./shared.js";
 
-const FAUCET_URL = "https://alphanet.faucet.nerdnest.xyz/accounts";
+// Faucet URL — set to local when using `bedrock node start`
+const FAUCET_URL = process.env.FAUCET_URL ?? "http://localhost:8080/faucet";
 
 // ── Faucet helper ─────────────────────────────────────────────────────────────
 
@@ -120,19 +121,15 @@ function extractVaultAccount(meta: unknown, excludeAddress: string): string | un
 async function registerVault(
   lendingClient: LendingClient,
   assetId: number,
-  vaultAddress: string,
 ): Promise<void> {
-  const accountId = decodeAccountID(vaultAddress);
-
-  // Args: u32LE(assetId) + 20-byte AccountID = 24 bytes
-  const args = new Uint8Array(24);
+  // set_vault(asset_id: u32) — caller becomes the vault account (write-once)
+  const args = new Uint8Array(4);
   args[0] = assetId & 0xff;
   args[1] = (assetId >> 8) & 0xff;
   args[2] = (assetId >> 16) & 0xff;
   args[3] = (assetId >> 24) & 0xff;
-  args.set(accountId, 4);
 
-  log(`Registering vault ${assetId} (${vaultAddress}) in contract...`);
+  log(`Registering vault ${assetId} in contract...`);
   const result = await lendingClient.submitInvoke("set_vault", args);
 
   if (result.engineResult !== "tesSUCCESS") {
@@ -194,9 +191,9 @@ async function main(): Promise<void> {
     // Reuse the existing connected client
     (lendingClient as unknown as { xrplClient: Client }).xrplClient = client;
 
-    await registerVault(lendingClient, 0, xrp.vaultAccount);
-    await registerVault(lendingClient, 1, rlusd.vaultAccount);
-    await registerVault(lendingClient, 2, wbtc.vaultAccount);
+    await registerVault(lendingClient, 0);
+    await registerVault(lendingClient, 1);
+    await registerVault(lendingClient, 2);
 
     // 4. Persist state
     saveDeployedState({

@@ -1,13 +1,22 @@
 /**
- * LendingClient — wraps xrpl.Client with XLS-101 contract interaction helpers.
+ * LendingClient — wraps xrpl.Client with XLS-101 ContractCall helpers.
  *
- * Two non-standard operations (not in xrpl.js v4):
- *   1. Building/submitting XLS-101 Invoke transactions
+ * Transaction type: ContractCall (XLS-101), encoded/signed via @transia/xrpl
+ * which knows the ContractCall binary codec definitions.
+ *
+ * Two non-standard operations (not in standard xrpl.js v4):
+ *   1. Building/submitting XLS-101 ContractCall transactions
  *   2. Reading contract state via `contract_info` RPC
  */
 
 import { Client, Wallet, decodeAccountID, encodeAccountID } from "xrpl";
-import type { TxResponse, SubmittableTransaction } from "xrpl";
+import type { TxResponse } from "xrpl";
+// @transia/xrpl is a fork of xrpl.js that knows ContractCall (XLS-101) fields.
+// Used exclusively for transaction encoding/signing in submitInvoke.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const transiaXrpl = require("@transia/xrpl") as {
+  Wallet: typeof import("xrpl").Wallet;
+};
 import { LendingError, LendingErrorCode } from "./types";
 
 // ── Public types ───────────────────────────────────────────────────────────────
@@ -104,16 +113,88 @@ export function fromHex(hex: string): Uint8Array {
   return bytes;
 }
 
+// ── ContractCall parameter schema ─────────────────────────────────────────────
+//
+// Maps each WASM export to its typed parameter list, used by argsToParameters()
+// to convert the raw args Uint8Array into XLS-101 ContractCall Parameters.
+//
+// Encoding convention (matches the args blobs built throughout the SDK):
+//   UINT32  → 4 bytes LE
+//   UINT64  → 8 bytes LE
+//   ACCOUNT → 20 bytes raw AccountID (encodeAccountID converts to r-address for the tx)
+
+type ParamType = "UINT32" | "UINT64" | "ACCOUNT";
+
+const FUNCTION_SCHEMAS: Record<string, ParamType[]> = {
+  supply:              ["UINT32", "UINT64"],
+  withdraw:            ["UINT32", "UINT64"],
+  borrow:              ["UINT32", "UINT64"],
+  repay:               ["UINT32", "UINT64"],
+  deposit_collateral:  ["UINT32", "UINT64"],
+  withdraw_collateral: ["UINT32", "UINT64"],
+  set_vault:           ["UINT32"],
+  // liquidate(borrower_ptr: u32, debt_id: u32, collat_id: u32, amount: u64)
+  liquidate:           ["ACCOUNT", "UINT32", "UINT32", "UINT64"],
+};
+
+/**
+ * Convert a raw args Uint8Array into a typed XLS-101 Parameters array.
+ * Returns undefined for unknown functions (no parameters in the ContractCall).
+ *
+ * Each element is wrapped as `{ Parameter: { ParameterFlag, ParameterValue } }`
+ * which satisfies the STArray codec requirement of one-key wrapper objects.
+ */
+function argsToParameters(
+  functionName: string,
+  args: Uint8Array,
+): Array<{ Parameter: { ParameterFlag: number; ParameterValue: { type: string; value: string } } }> | undefined {
+  const schema = FUNCTION_SCHEMAS[functionName];
+  if (!schema) return undefined;
+
+  const params: Array<{ Parameter: { ParameterFlag: number; ParameterValue: { type: string; value: string } } }> = [];
+  let offset = 0;
+
+  for (let i = 0; i < schema.length; i++) {
+    const type = schema[i];
+    switch (type) {
+      case "UINT32": {
+        const v = (args[offset] | (args[offset + 1] << 8) | (args[offset + 2] << 16) | (args[offset + 3] << 24)) >>> 0;
+        params.push({ Parameter: { ParameterFlag: i, ParameterValue: { type: "UINT32", value: v.toString() } } });
+        offset += 4;
+        break;
+      }
+      case "UINT64": {
+        let v = 0n;
+        for (let j = 7; j >= 0; j--) v = (v << 8n) | BigInt(args[offset + j]);
+        params.push({ Parameter: { ParameterFlag: i, ParameterValue: { type: "UINT64", value: v.toString() } } });
+        offset += 8;
+        break;
+      }
+      case "ACCOUNT": {
+        const accountId = args.slice(offset, offset + 20);
+        const address = encodeAccountID(accountId);
+        params.push({ Parameter: { ParameterFlag: i, ParameterValue: { type: "ACCOUNT", value: address } } });
+        offset += 20;
+        break;
+      }
+    }
+  }
+
+  return params.length > 0 ? params : undefined;
+}
+
 // ── LendingClient ─────────────────────────────────────────────────────────────
 
 export class LendingClient {
   readonly xrplClient: Client;
   readonly contractAddress: string;
+  readonly wsUrl: string;
   private _wallet?: Wallet;
 
   constructor(config: LendingClientConfig) {
     this.xrplClient = new Client(config.wsUrl);
     this.contractAddress = config.contractAddress;
+    this.wsUrl = config.wsUrl;
     this._wallet = config.wallet;
   }
 
@@ -154,51 +235,141 @@ export class LendingClient {
   // ── Transaction building ────────────────────────────────────────────────────
 
   /**
-   * Build a raw XLS-101 Invoke transaction JSON.
+   * Build an XLS-101 ContractCall transaction JSON.
    *
-   * Encoding: HexValue = utf8_hex(functionName) + "00" + hex(args)
-   * The single InvokeArg carries the full call payload.
+   * Parameters are derived from the function's schema in FUNCTION_SCHEMAS,
+   * converting the raw `args` buffer into typed UINT32/UINT64/ACCOUNT entries.
    */
   buildInvokeTx(functionName: string, args: Uint8Array): Record<string, unknown> {
-    const nameBytes = new TextEncoder().encode(functionName);
-    const separator = new Uint8Array([0x00]);
-    const payload = new Uint8Array(nameBytes.length + 1 + args.length);
-    payload.set(nameBytes, 0);
-    payload.set(separator, nameBytes.length);
-    payload.set(args, nameBytes.length + 1);
+    const FunctionName = toHex(new TextEncoder().encode(functionName)).toUpperCase();
+    const Parameters = argsToParameters(functionName, args);
 
-    return {
-      TransactionType: "Invoke",
+    const tx: Record<string, unknown> = {
+      TransactionType: "ContractCall",
       Account: this.getAccountAddress(),
-      Destination: this.contractAddress,
-      InvokeArgs: [
-        { InvokeArg: { HexValue: toHex(payload).toUpperCase() } },
-      ],
+      ContractAccount: this.contractAddress,
+      FunctionName,
+      ComputationAllowance: 1000000,
     };
+
+    if (Parameters !== undefined) {
+      tx.Parameters = Parameters;
+    }
+
+    return tx;
   }
 
   /**
-   * Submit an Invoke transaction and wait for ledger validation.
+   * Read the network ID from the connected XRPL node.
+   * Used to populate the NetworkID field in ContractCall transactions.
+   */
+  private async getNetworkId(): Promise<number> {
+    // xrpl.js v4 exposes networkID after connection
+    const id = (this.xrplClient as unknown as { networkID?: number }).networkID;
+    if (typeof id === "number" && id > 0) return id;
+
+    // Fallback: query server_info
+    const info = await this.xrplClient.request({
+      command: "server_info",
+    } as Parameters<typeof this.xrplClient.request>[0]);
+    const result = (info as unknown as Record<string, unknown>).result as Record<string, unknown>;
+    const serverInfo = result?.info as Record<string, unknown> | undefined;
+    return (serverInfo?.network_id as number | undefined) ?? 0;
+  }
+
+  /**
+   * Submit a ContractCall transaction and wait for ledger validation.
+   *
+   * Encoding and signing uses @transia/xrpl which knows XLS-101 ContractCall
+   * binary codec definitions (not present in standard xrpl.js v4).
    */
   async submitInvoke(functionName: string, args: Uint8Array): Promise<TxResult> {
-    const tx = this.buildInvokeTx(functionName, args);
     const wallet = this.getWallet();
-    const result = await this.xrplClient.submitAndWait(
-      tx as unknown as SubmittableTransaction,
-      { autofill: true, wallet },
-    ) as TxResponse;
+    const networkId = await this.getNetworkId();
 
-    const meta = result.result.meta as Record<string, unknown> | undefined;
-    const engineResult =
-      typeof meta?.TransactionResult === "string"
-        ? meta.TransactionResult
-        : "unknown";
+    // 1. Autofill: get current sequence number via HTTP RPC (avoids api_version: 2
+    //    incompatibility with local Bedrock nodes that only support api_version: 1)
+    const wsUrl = this.wsUrl;
+    const rpcUrl = wsUrl.replace("wss://", "https://").replace("ws://", "http://")
+      .replace(":6006", ":5005").replace(":51233", ":51234");
 
-    return {
-      hash: result.result.hash as string,
-      validated: (result.result.validated as boolean) ?? false,
-      engineResult,
-    };
+    const acctRes = await fetch(rpcUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        method: "account_info",
+        params: [{ account: wallet.classicAddress, ledger_index: "current" }],
+      }),
+    });
+    const acctJson = await acctRes.json() as Record<string, unknown>;
+    const acctResult = acctJson.result as Record<string, unknown>;
+    const data = acctResult.account_data as Record<string, unknown>;
+
+    // 2. Build the ContractCall transaction
+    const tx = this.buildInvokeTx(functionName, args);
+    tx.Sequence = data.Sequence as number;
+    tx.Fee = "1000000"; // 1 XRP — generous for contract calls
+    tx.SigningPubKey = wallet.publicKey;
+    tx.Flags = 0;
+    if (networkId > 0) {
+      tx.NetworkID = networkId;
+    }
+
+    // 3. Sign using @transia/xrpl (knows ContractCall binary encoding)
+    const transiaWallet = new transiaXrpl.Wallet(wallet.publicKey, wallet.privateKey!);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const signed = (transiaWallet as any).sign(tx) as { tx_blob: string; hash: string };
+
+    // 4. Submit via HTTP RPC (rpcUrl already derived above)
+    let hash = signed.hash;
+
+    try {
+      const submitRes = await fetch(rpcUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ method: "submit", params: [{ tx_blob: signed.tx_blob }] }),
+      });
+      const submitJson = await submitRes.json() as Record<string, unknown>;
+      const submitResult = submitJson.result as Record<string, unknown>;
+      hash = (submitResult.tx_json as Record<string, unknown>)?.hash as string ?? hash;
+      const engineResult = submitResult.engine_result as string ?? "unknown";
+
+      if (engineResult !== "tesSUCCESS" && !engineResult.startsWith("ter")) {
+        return { hash, validated: false, engineResult };
+      }
+    } catch {
+      // Fallback: WebSocket submit
+      const subRes = await this.xrplClient.request({
+        command: "submit",
+        tx_blob: signed.tx_blob,
+      } as Parameters<typeof this.xrplClient.request>[0]);
+      const r = (subRes as unknown as Record<string, unknown>).result as Record<string, unknown>;
+      hash = ((r.tx_json as Record<string, unknown>)?.hash as string) ?? hash;
+    }
+
+    // 5. Poll for validation (up to 30s)
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      try {
+        const txRes = await this.xrplClient.request({
+          command: "tx",
+          transaction: hash,
+        } as Parameters<typeof this.xrplClient.request>[0]);
+        const r = (txRes as unknown as Record<string, unknown>).result as Record<string, unknown>;
+        if (r.validated) {
+          const meta = r.meta as Record<string, unknown> | undefined;
+          return {
+            hash,
+            validated: true,
+            engineResult: (meta?.TransactionResult as string) ?? "tesSUCCESS",
+          };
+        }
+      } catch {
+        // not yet found
+      }
+    }
+
+    return { hash, validated: false, engineResult: "timeout" };
   }
 
   // ── State reads ─────────────────────────────────────────────────────────────

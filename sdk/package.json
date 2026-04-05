@@ -9,6 +9,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@transia/xrpl": "^4.4.6-alpha.0",
     "xrpl": "^4.0.0"
   },
   "devDependencies": {
