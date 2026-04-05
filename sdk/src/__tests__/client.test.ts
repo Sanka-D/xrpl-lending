@@ -1,0 +1,172 @@
+import { describe, it, expect } from "vitest";
+import {
+  LendingClient,
+  encodeU32LE,
+  encodeU64LE,
+  decodeBigintLE,
+  marketInterestKey,
+  userPositionKey,
+  globalKey,
+  toHex,
+  fromHex,
+} from "../client";
+
+// ── Encoding helpers ──────────────────────────────────────────────────────────
+
+describe("encodeU32LE", () => {
+  it("encodes 0", () => {
+    expect(encodeU32LE(0)).toEqual(new Uint8Array([0, 0, 0, 0]));
+  });
+
+  it("encodes 1 as first byte", () => {
+    expect(encodeU32LE(1)).toEqual(new Uint8Array([1, 0, 0, 0]));
+  });
+
+  it("encodes 256", () => {
+    expect(encodeU32LE(256)).toEqual(new Uint8Array([0, 1, 0, 0]));
+  });
+
+  it("encodes max u32", () => {
+    expect(encodeU32LE(0xffffffff)).toEqual(new Uint8Array([0xff, 0xff, 0xff, 0xff]));
+  });
+});
+
+describe("encodeU64LE / decodeBigintLE roundtrip", () => {
+  it("zero", () => {
+    const enc = encodeU64LE(0n);
+    expect(decodeBigintLE(enc)).toBe(0n);
+  });
+
+  it("value 1", () => {
+    const enc = encodeU64LE(1n);
+    expect(decodeBigintLE(enc)).toBe(1n);
+  });
+
+  it("large u64", () => {
+    const v = 100_000_000_000_000_000n;
+    expect(decodeBigintLE(encodeU64LE(v))).toBe(v);
+  });
+
+  it("u128 (16 bytes) roundtrip", () => {
+    const v = 10n ** 30n;
+    const buf = new Uint8Array(16);
+    let rem = v;
+    for (let i = 0; i < 16; i++) { buf[i] = Number(rem & 0xffn); rem >>= 8n; }
+    expect(decodeBigintLE(buf)).toBe(v);
+  });
+});
+
+// ── State key builders ────────────────────────────────────────────────────────
+
+describe("marketInterestKey", () => {
+  it("generates correct key for asset 0, field 'br'", () => {
+    const key = marketInterestKey(0, "br");
+    expect(new TextDecoder().decode(key)).toBe("mkt:0:int:br");
+  });
+
+  it("generates correct key for asset 2, field 'bi'", () => {
+    const key = marketInterestKey(2, "bi");
+    expect(new TextDecoder().decode(key)).toBe("mkt:2:int:bi");
+  });
+});
+
+describe("userPositionKey", () => {
+  it("starts with 'pos:' prefix", () => {
+    const accountId = new Uint8Array(20);
+    const key = userPositionKey(accountId, 0, "co");
+    expect(new TextDecoder().decode(key.slice(0, 4))).toBe("pos:");
+  });
+
+  it("embeds 20 raw account bytes", () => {
+    const accountId = new Uint8Array(20).fill(0xab);
+    const key = userPositionKey(accountId, 0, "co");
+    expect(key.slice(4, 24)).toEqual(accountId);
+  });
+
+  it("ends with asset index and field", () => {
+    const accountId = new Uint8Array(20);
+    const key = userPositionKey(accountId, 1, "de");
+    const tail = new TextDecoder().decode(key.slice(24));
+    expect(tail).toBe(":1:de");
+  });
+});
+
+describe("globalKey", () => {
+  it("generates 'glb:vault0'", () => {
+    const key = globalKey("vault0");
+    expect(new TextDecoder().decode(key)).toBe("glb:vault0");
+  });
+});
+
+// ── Hex utilities ─────────────────────────────────────────────────────────────
+
+describe("toHex / fromHex", () => {
+  it("roundtrip", () => {
+    const bytes = new Uint8Array([0x01, 0xab, 0xcd, 0xef]);
+    expect(fromHex(toHex(bytes))).toEqual(bytes);
+  });
+
+  it("handles 0x prefix", () => {
+    expect(fromHex("0xff")).toEqual(new Uint8Array([0xff]));
+  });
+
+  it("lowercase hex", () => {
+    expect(toHex(new Uint8Array([255]))).toBe("ff");
+  });
+});
+
+// ── Address utilities ─────────────────────────────────────────────────────────
+
+describe("LendingClient address utils", () => {
+  it("addressToAccountId roundtrip", () => {
+    const address = "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh";
+    const accountId = LendingClient.addressToAccountId(address);
+    expect(accountId).toHaveLength(20);
+    expect(LendingClient.accountIdToAddress(accountId)).toBe(address);
+  });
+
+  it("different addresses produce different AccountIDs", () => {
+    const a = LendingClient.addressToAccountId("rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh");
+    const b = LendingClient.addressToAccountId("rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe");
+    expect(toHex(a)).not.toBe(toHex(b));
+  });
+});
+
+// ── buildInvokeTx ─────────────────────────────────────────────────────────────
+
+describe("buildInvokeTx", () => {
+  it("produces Invoke transaction type", () => {
+    const config = {
+      wsUrl: "wss://test",
+      contractAddress: "rContractXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+      wallet: { classicAddress: "rCallerXXXXXXXXXXXXXXXXXXXXXXXXXXX" } as unknown as import("xrpl").Wallet,
+    };
+    const client = new LendingClient(config);
+    const tx = client.buildInvokeTx("supply", new Uint8Array([0x01, 0x02]));
+
+    expect(tx.TransactionType).toBe("Invoke");
+    expect(tx.Destination).toBe("rContractXXXXXXXXXXXXXXXXXXXXXXXXXXX");
+    expect(Array.isArray(tx.InvokeArgs)).toBe(true);
+  });
+
+  it("HexValue encodes function name + null + args", () => {
+    const config = {
+      wsUrl: "wss://test",
+      contractAddress: "rXXX",
+      wallet: { classicAddress: "rYYY" } as unknown as import("xrpl").Wallet,
+    };
+    const client = new LendingClient(config);
+    const args = new Uint8Array([0x00, 0xff]);
+    const tx = client.buildInvokeTx("supply", args);
+
+    const invokeArgs = tx.InvokeArgs as Array<{ InvokeArg: { HexValue: string } }>;
+    const hexValue = invokeArgs[0].InvokeArg.HexValue.toLowerCase();
+
+    // "supply" in UTF-8 hex = 737570706c79
+    expect(hexValue.startsWith("737570706c79")).toBe(true);
+    // followed by null separator "00"
+    expect(hexValue).toContain("737570706c7900");
+    // followed by args hex "00ff"
+    expect(hexValue.endsWith("00ff")).toBe(true);
+  });
+});

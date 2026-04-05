@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# TypeScript build output
+dist/
+build/
+
+# Rust build output
+target/
+
+# Deploy state (contains secrets / network-specific addresses)
+deploy/deployed.json
+
+# Environment files (may contain private keys)
+.env
+.env.*
+
+# OS / editor
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Vitest cache
+.vitest/

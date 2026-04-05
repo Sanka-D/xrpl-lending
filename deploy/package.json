@@ -1,0 +1,23 @@
+{
+  "name": "xrpl-lending-deploy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy:vaults":     "tsx deploy-vaults.ts",
+    "deploy:controller": "tsx deploy-controller.ts",
+    "configure:markets": "tsx configure-markets.ts",
+    "setup:oracle":      "tsx setup-oracle.ts",
+    "typecheck":         "tsc --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^16.0.0",
+    "xrpl": "^4.0.0",
+    "xrpl-lending-sdk": "file:../sdk"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.5.0"
+  }
+}

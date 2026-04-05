@@ -1,0 +1,21 @@
+{
+  "name": "xrpl-lending-keeper",
+  "version": "0.1.0",
+  "scripts": {
+    "build": "tsc",
+    "start": "ts-node src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "xrpl": "^4.0.0",
+    "dotenv": "^16.0.0",
+    "xrpl-lending-sdk": "file:../sdk"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0",
+    "@types/node": "^22.0.0",
+    "ts-node": "^10.9.0"
+  }
+}
