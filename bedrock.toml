@@ -1,0 +1,33 @@
+[project]
+name = "lending-controller"
+version = "0.1.0"
+authors = ["XRPL Lending Protocol"]
+
+primitives = ["contract"]
+
+[build]
+source = "contracts/lending-controller/src/lib.rs"
+output = "contracts/lending-controller/target/wasm32-unknown-unknown/release"
+target = "wasm32-unknown-unknown"
+
+[local_node]
+config_dir = ".bedrock/node-config"
+docker_image = "transia/cluster:f5d78179c9d1fbaf8bff8b77a052e263df90faa1"
+ledger_interval = 1000
+
+[networks.local]
+url = "ws://localhost:6006"
+network_id = 63456
+faucet_url = "http://localhost:8080/faucet"
+
+[networks.alphanet]
+url = "wss://alphanet.nerdnest.xyz"
+network_id = 21465
+faucet_url = "https://alphanet.faucet.nerdnest.xyz/accounts"
+
+[contracts.main]
+source = "contracts/lending-controller/src/lib.rs"
+abi = "contracts/lending-controller/build/abi.json"
+
+[wallets]
+keystore = ".wallets/keystore.json"

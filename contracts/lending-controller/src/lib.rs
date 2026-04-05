@@ -522,9 +522,10 @@ pub extern "C" fn get_health_factor(user_ptr: u32) -> u64 {
 ///     [32..40] user_borrow_index (u64 LE — truncated WAD ratio)
 ///
 /// The serialised blob is written via the `set_return_value` host function.
+// NOTE: Not exported from WASM (XLS-101 limits Functions array to 8 entries).
+// State is readable directly from ledger key-value store via LendingClient.
 #[cfg(target_arch = "wasm32")]
-#[unsafe(no_mangle)]
-pub extern "C" fn get_user_position(user_ptr: u32) -> u32 {
+pub fn get_user_position(user_ptr: u32) -> u32 {
     let user: [u8; 20] = unsafe {
         let ptr = user_ptr as *const u8;
         let mut arr = [0u8; 20];
