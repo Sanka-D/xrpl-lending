@@ -14,7 +14,7 @@ loadDotenv({ path: resolve(__dirname, "../.env"), override: false });
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-export const ALPHANET_WSS = "wss://amm.devnet.rippletest.net:51233";
+export const ALPHANET_WSS = "wss://alphanet.nerdnest.xyz";
 export const DEPLOYED_STATE_FILE = resolve(__dirname, "deployed.json");
 export const WASM_PATH = resolve(
   __dirname,
@@ -42,6 +42,10 @@ export interface DeployedState {
   controllerAddress?: string;
   /** Vault accounts registered in contract global state */
   vaultAccounts?: { XRP?: string; RLUSD?: string; WBTC?: string };
+  /** r-address of the RLUSD token issuer on this network */
+  rlusdIssuer?: string;
+  /** r-address of the wBTC token issuer on this network */
+  wbtcIssuer?: string;
 }
 
 // ── Config loading ────────────────────────────────────────────────────────────

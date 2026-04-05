@@ -462,14 +462,51 @@ pub extern "C" fn liquidate(
     }
 }
 
+/// Register the XLS-65 supply vault account for `asset_id` (0=XRP, 1=RLUSD, 2=wBTC).
+///
+/// `asset_id`   — u32 LE (4 bytes) passed as the first WASM argument.
+/// `account_ptr`— pointer to the 20-byte XRPL AccountID in WASM linear memory.
+///
+/// First-write protected: returns error 900 (NotAdmin) if the vault is already set.
+/// Call once per asset during initial deployment setup.
+#[cfg(target_arch = "wasm32")]
+#[unsafe(no_mangle)]
+pub extern "C" fn set_vault(asset_id: u32, account_ptr: u32) -> i32 {
+    if asset_id > 2 { rollback_tx(LendingError::MarketNotConfigured); }
+
+    // Read current vault — if non-zero, already initialized
+    let key: &[u8] = match asset_id {
+        0 => b"vault0",
+        1 => b"vault1",
+        _ => b"vault2",
+    };
+    let (k, l) = global_key(key);
+    let mut current = [0u8; 20];
+    read_state(&k[..l], &mut current);
+    if current != [0u8; 20] { rollback_tx(LendingError::NotAdmin); }
+
+    // Write new vault account (20 bytes from WASM memory)
+    let account: [u8; 20] = unsafe {
+        let ptr = account_ptr as *const u8;
+        let mut arr = [0u8; 20];
+        core::ptr::copy_nonoverlapping(ptr, arr.as_mut_ptr(), 20);
+        arr
+    };
+    write_state(&k[..l], &account);
+    accept_tx();
+    0
+}
+
 /// Return the health factor of `user` as a WAD-scaled u64.
 ///
 /// `user_ptr` — pointer to 20-byte XRPL AccountID in WASM memory.
 /// Returns WAD (1e18) = healthy, < WAD = liquidatable, u64::MAX = no debt.
 /// Saturates to u64::MAX for the no-debt case.
+// NOTE: Not exported (XLS-101 limits Functions STArray to 8 entries — set_vault
+// takes priority as it is essential for protocol initialization).
+// Health factor is computable client-side via LendingClient.readContractState.
 #[cfg(target_arch = "wasm32")]
-#[unsafe(no_mangle)]
-pub extern "C" fn get_health_factor(user_ptr: u32) -> u64 {
+pub fn get_health_factor(user_ptr: u32) -> u64 {
     let user: [u8; 20] = unsafe {
         let ptr = user_ptr as *const u8;
         let mut arr = [0u8; 20];
