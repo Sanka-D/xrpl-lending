@@ -10,6 +10,10 @@
     "setup:markets":     "tsx setup-markets.ts",
     "register:vaults":   "tsx register-vaults.ts",
     "setup:oracle":      "tsx setup-oracle.ts",
+    "smoke-test":        "tsx smoke-test.ts",
+    "create-oracle":     "tsx create-local-oracle.ts",
+    "setup:mock-vaults": "tsx setup-mock-vaults.ts",
+    "fund-wallets":      "tsx fund-test-wallets.ts",
     "typecheck":         "tsc --noEmit"
   },
   "dependencies": {

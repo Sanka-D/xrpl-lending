@@ -16,7 +16,7 @@
 import { Client, Wallet } from "xrpl";
 import type { SubmittableTransaction, TxResponse } from "xrpl";
 import {
-  loadDeployEnv, loadDeployedState, saveDeployedState,
+  loadDeployEnv, loadDeployedState, loadDeployWallet, saveDeployedState,
   extractCreatedNodeIndex, log, die,
 } from "./shared.js";
 
@@ -69,7 +69,7 @@ async function createVault(
 
 async function main(): Promise<void> {
   const env = loadDeployEnv();
-  const wallet = Wallet.fromSeed(env.deployerSecret);
+  const wallet = loadDeployWallet(env.deployerSecret);
 
   log("Connecting to XRPL...", { url: env.wsUrl, deployer: wallet.classicAddress });
 

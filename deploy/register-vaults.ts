@@ -13,7 +13,7 @@
 
 import { Client, Wallet } from "xrpl";
 import { LendingClient } from "xrpl-lending-sdk";
-import { loadDeployEnv, loadDeployedState, saveDeployedState, log, die } from "./shared.js";
+import { loadDeployEnv, loadDeployedState, loadDeployWallet, saveDeployedState, log, die } from "./shared.js";
 
 async function registerVault(
   lendingClient: LendingClient,
@@ -45,7 +45,7 @@ async function main(): Promise<void> {
     die("No controllerAddress in deployed.json. Deploy the contract first.");
   }
 
-  const deployer = Wallet.fromSeed(env.deployerSecret);
+  const deployer = loadDeployWallet(env.deployerSecret);
 
   log("Registering vaults", {
     controller: state.controllerAddress,

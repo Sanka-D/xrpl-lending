@@ -19,7 +19,7 @@ import {
   LendingClient, AssetIndex, V1_MARKETS, DIA_ORACLE_ACCOUNT, DIA_DOCUMENT_ID,
   ASSET_TICKERS,
 } from "xrpl-lending-sdk";
-import { loadDeployEnv, loadDeployedState, log, die } from "./shared.js";
+import { loadDeployEnv, loadDeployedState, loadDeployWallet, log, die } from "./shared.js";
 
 // ── Encoding helpers ──────────────────────────────────────────────────────────
 
@@ -126,7 +126,7 @@ async function main(): Promise<void> {
     die("No controllerAddress in deployed.json. Run deploy-controller.ts first.");
   }
 
-  const wallet = Wallet.fromSeed(env.deployerSecret);
+  const wallet = loadDeployWallet(env.deployerSecret);
   log("Configuring markets...", {
     controller: existing.controllerAddress,
     deployer: wallet.classicAddress,

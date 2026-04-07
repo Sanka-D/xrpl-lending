@@ -7,6 +7,7 @@ import { readFileSync, writeFileSync, existsSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { config as loadDotenv } from "dotenv";
+import { Wallet } from "xrpl";
 
 // Load .env from repo root (one level up from deploy/)
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -95,6 +96,16 @@ export function log(msg: string, data?: unknown): void {
   } else {
     console.log(`[${ts}] ${msg}`);
   }
+}
+
+/**
+ * Create the deployer wallet from a seed.
+ * Defaults to ecdsa-secp256k1 (required for the Bedrock genesis account).
+ * Set DEPLOYER_KEY_TYPE=ed25519 to override.
+ */
+export function loadDeployWallet(secret: string): Wallet {
+  const algo = (process.env.DEPLOYER_KEY_TYPE ?? "ecdsa-secp256k1") as "ecdsa-secp256k1" | "ed25519";
+  return Wallet.fromSeed(secret, { algorithm: algo });
 }
 
 export function die(msg: string): never {

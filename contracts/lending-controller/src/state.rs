@@ -35,14 +35,15 @@ pub const NUM_V1_MARKETS: u8 = 3;
 ///   wBTC:  8  (1 BTC   = 100,000,000 satoshis)
 pub const ASSET_DECIMALS: [u8; 3] = [6, 6, 8];
 
-/// DIA oracle on mainnet / AlphaNet
-/// rP24Lp7bcUHvEW7T7c8xkxtQKKd9fZyra7 (20-byte AccountID representation)
+/// Oracle account for price reads.
+/// Local Bedrock: rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh (genesis account, used as mock oracle)
+/// AlphaNet/Production: change back to rP24Lp7bcUHvEW7T7c8xkxtQKKd9fZyra7
 pub const DIA_ORACLE_ACCOUNT: [u8; 20] = [
-    0x7c, 0x02, 0x2b, 0x7b, 0x00, 0xd4, 0x3e, 0xd3, 0x2c, 0x5d,
-    0x00, 0x36, 0x4e, 0x37, 0x4a, 0x2f, 0x4b, 0xc2, 0x24, 0x57,
+    0xb5, 0xf7, 0x62, 0x79, 0x8a, 0x53, 0xd5, 0x43, 0xa0, 0x14,
+    0xca, 0xf8, 0xb2, 0x97, 0xcf, 0xf8, 0xf2, 0xf9, 0x37, 0xe8,
 ];
 pub const DIA_DOCUMENT_ID: u32 = 42;
-pub const MAX_ORACLE_STALENESS_SECS: u64 = 300;
+pub const MAX_ORACLE_STALENESS_SECS: u64 = 86400; // 24h — permissif pour tests locaux
 
 /// BTC asset ticker in DIA (hex-encoded): "BTC\0\0..." padded to 20 bytes
 pub const TICKER_BTC_HEX: [u8; 20] = [
@@ -331,20 +332,25 @@ pub fn market_interest_key(asset_index: u8, field: &[u8]) -> ([u8; 24], usize) {
     (buf, 10 + field_len)
 }
 
-/// Build key: "pos:{account_20bytes_as_hex}:{i}:{field}"
-/// account is raw 20 bytes; field ≤ 4 bytes.
-/// Output key is 48 bytes max.
-pub fn user_position_key(account: &[u8; 20], asset_index: u8, field: &[u8]) -> ([u8; 48], usize) {
-    let mut buf = [0u8; 48];
+/// Build key: "pos:{account_40_hex}:{i}:{field}"
+/// account is hex-encoded (40 ASCII chars) to avoid binary bytes in field names.
+/// Bedrock may require printable-ASCII field names for `set/get_data_object_field`.
+/// Buffer size 56: 4 "pos:" + 40 hex + 1 ":" + 1 digit + 1 ":" + 4 field = 51 max → 56
+pub fn user_position_key(account: &[u8; 20], asset_index: u8, field: &[u8]) -> ([u8; 56], usize) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut buf = [0u8; 56];
     buf[0] = b'p'; buf[1] = b'o'; buf[2] = b's'; buf[3] = b':';
-    // Write 20 bytes of account directly (binary, not hex — saves space)
-    buf[4..24].copy_from_slice(account);
-    buf[24] = b':';
-    buf[25] = b'0' + asset_index;
-    buf[26] = b':';
-    let field_len = field.len().min(20);
-    buf[27..27 + field_len].copy_from_slice(&field[..field_len]);
-    (buf, 27 + field_len)
+    // Hex-encode 20 account bytes → 40 ASCII hex chars
+    for i in 0..20 {
+        buf[4 + i * 2]     = HEX[(account[i] >> 4) as usize];
+        buf[4 + i * 2 + 1] = HEX[(account[i] & 0xf) as usize];
+    }
+    buf[44] = b':';
+    buf[45] = b'0' + asset_index;
+    buf[46] = b':';
+    let field_len = field.len().min(8);
+    buf[47..47 + field_len].copy_from_slice(&field[..field_len]);
+    (buf, 47 + field_len)
 }
 
 /// Build key: "glb:{field}"
@@ -460,12 +466,14 @@ mod tests {
     fn storage_key_user_position() {
         let account = [0xAAu8; 20];
         let (key, len) = user_position_key(&account, 0, b"col");
-        // prefix "pos:" (4) + 20 bytes + ":" (1) + "0" (1) + ":" (1) + "col" (3) = 30
-        assert_eq!(len, 30);
+        // "pos:" (4) + 40 hex (40) + ":" (1) + "0" (1) + ":" (1) + "col" (3) = 50
+        assert_eq!(len, 50);
         assert_eq!(&key[..4], b"pos:");
-        assert_eq!(key[24], b':');
-        assert_eq!(key[25], b'0'); // asset_index 0
-        assert_eq!(&key[27..30], b"col");
+        // 0xAA hex-encoded = "aa"
+        assert_eq!(&key[4..6], b"aa");
+        assert_eq!(key[44], b':');
+        assert_eq!(key[45], b'0'); // asset_index 0
+        assert_eq!(&key[47..50], b"col");
     }
 
     #[test]

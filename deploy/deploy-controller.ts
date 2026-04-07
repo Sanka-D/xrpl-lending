@@ -14,18 +14,33 @@
 import { execSync } from "child_process";
 import { readFileSync } from "fs";
 import { resolve, dirname } from "path";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
+import { createRequire } from "module";
 import { Client, Wallet } from "xrpl";
-import type { SubmittableTransaction, TxResponse } from "xrpl";
 import {
-  loadDeployEnv, loadDeployedState, saveDeployedState,
+  loadDeployEnv, loadDeployedState, loadDeployWallet, saveDeployedState,
   extractCreatedAccount, toUpperHex, log, die, WASM_PATH,
 } from "./shared.js";
 import { LendingClient } from "xrpl-lending-sdk";
 import { globalKey, toHex } from "xrpl-lending-sdk";
 
+// @transia/xrpl is a fork of xrpl.js that knows ContractCreate (XLS-101) binary encoding.
+// Use createRequire because deploy/ is an ESM package but @transia/xrpl is CJS.
+const _require = createRequire(import.meta.url);
+const transiaXrpl = _require("xrpl-lending-sdk/node_modules/@transia/xrpl") as {
+  Wallet: typeof Wallet;
+};
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONTRACT_DIR = resolve(__dirname, "../contracts/lending-controller");
+
+// WASM-exported function names (hex-encoded) registered in ContractCreate.Functions ABI.
+// Max 8 functions per ContractCreate (temARRAY_TOO_LARGE otherwise).
+// View functions (get_health_factor, get_user_position) are callable without ABI registration.
+const CONTRACT_FUNCTIONS = [
+  "set_vault", "supply", "deposit_collateral", "borrow", "repay",
+  "withdraw", "withdraw_collateral", "liquidate",
+].map(name => ({ Function: { FunctionName: Buffer.from(name).toString("hex").toUpperCase() } }));
 
 // ── Build WASM ────────────────────────────────────────────────────────────────
 
@@ -51,32 +66,93 @@ async function deployContract(
 ): Promise<string> {
   log("Submitting ContractCreate transaction...", { wasmBytes: wasmHex.length / 2 });
 
-  const tx = {
+  const wsUrl = (client as unknown as { connection: { url: string } }).connection?.url
+    ?? "ws://localhost:6006";
+  const rpcUrl = wsUrl.replace("wss://", "https://").replace("ws://", "http://")
+    .replace(":6006", ":5005").replace(":51233", ":51234");
+
+  // Autofill sequence + networkId via HTTP RPC
+  const acctRes = await fetch(rpcUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      method: "account_info",
+      params: [{ account: wallet.classicAddress, ledger_index: "current" }],
+    }),
+  });
+  const acctJson = await acctRes.json() as Record<string, unknown>;
+  const acctData = ((acctJson.result as Record<string, unknown>).account_data as Record<string, unknown>);
+
+  const serverRes = await fetch(rpcUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ method: "server_info", params: [{}] }),
+  });
+  const serverJson = await serverRes.json() as Record<string, unknown>;
+  const networkId = ((serverJson.result as Record<string, unknown>).info as Record<string, unknown>)?.network_id as number ?? 0;
+
+  const tx: Record<string, unknown> = {
     TransactionType: "ContractCreate",
     Account: wallet.classicAddress,
-    WASMBytecode: wasmHex,
+    ContractCode: wasmHex,
+    Functions: CONTRACT_FUNCTIONS,
+    Fee: "1000000",
+    Sequence: acctData.Sequence as number,
+    SigningPubKey: wallet.publicKey,
+    Flags: 0,
   };
+  if (networkId > 0) tx.NetworkID = networkId;
 
-  const result = await client.submitAndWait(
-    tx as unknown as SubmittableTransaction,
-    { autofill: true, wallet },
-  ) as TxResponse;
+  // Sign using @transia/xrpl (knows ContractCreate binary encoding)
+  const transiaWallet = new transiaXrpl.Wallet(wallet.publicKey, (wallet as unknown as { privateKey: string }).privateKey);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const signed = (transiaWallet as any).sign(tx) as { tx_blob: string; hash: string };
 
-  const meta = result.result.meta as unknown as Record<string, unknown>;
-  const engineResult = (meta?.TransactionResult as string) ?? "unknown";
+  log("Signed ContractCreate, submitting...", { hash: signed.hash });
 
-  if (engineResult !== "tesSUCCESS") {
-    die(`ContractCreate failed: ${engineResult}`);
+  const submitRes = await fetch(rpcUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ method: "submit", params: [{ tx_blob: signed.tx_blob }] }),
+  });
+  const submitJson = await submitRes.json() as Record<string, unknown>;
+  const submitResult = submitJson.result as Record<string, unknown>;
+  const engineResult = submitResult.engine_result as string ?? "unknown";
+
+  if (engineResult !== "tesSUCCESS" && !engineResult.startsWith("ter")) {
+    die(`ContractCreate submit failed: ${engineResult} — ${JSON.stringify(submitResult.engine_result_message ?? "")}`);
   }
 
-  // Extract the contract pseudo-account from metadata
-  const contractAddress = extractCreatedAccount(meta);
-  if (!contractAddress) {
-    die("No contract pseudo-account found in ContractCreate metadata");
+  // Poll for validation (up to 30 ledgers)
+  let hash = signed.hash;
+  for (let i = 0; i < 30; i++) {
+    await new Promise(r => setTimeout(r, 1000));
+    try {
+      const txRes = await client.request({
+        command: "tx",
+        transaction: hash,
+      } as Parameters<typeof client.request>[0]);
+      const r = (txRes as unknown as Record<string, unknown>).result as Record<string, unknown>;
+      if (r.validated) {
+        const meta = r.meta as Record<string, unknown>;
+        const finalResult = (meta?.TransactionResult as string) ?? "unknown";
+        if (finalResult !== "tesSUCCESS") {
+          die(`ContractCreate failed on-chain: ${finalResult}`);
+        }
+        // Extract the contract pseudo-account from metadata
+        const contractAddress = extractCreatedAccount(meta);
+        if (!contractAddress) {
+          // Dump metadata to help debug
+          log("ContractCreate metadata (no AccountRoot found):", meta);
+          die("No contract pseudo-account found in ContractCreate metadata");
+        }
+        log("Contract deployed", { contractAddress, hash });
+        return contractAddress;
+      }
+    } catch { /* not yet validated */ }
   }
 
-  log("Contract deployed", { contractAddress, hash: result.result.hash });
-  return contractAddress;
+  die(`ContractCreate not validated after 30s (hash: ${hash})`);
 }
 
 // ── Register vault accounts ───────────────────────────────────────────────────
@@ -106,16 +182,14 @@ async function registerVaultAccount(
 
 async function main(): Promise<void> {
   const env = loadDeployEnv();
-  const wallet = Wallet.fromSeed(env.deployerSecret);
+  const wallet = loadDeployWallet(env.deployerSecret);
 
-  const existing = loadDeployedState();
-  if (!existing) {
-    die("No deployed.json found. Run deploy-vaults.ts first.");
-  }
-
-  if (!existing.vaultIds.XRP || !existing.vaultIds.RLUSD || !existing.vaultIds.WBTC) {
-    die("All vault IDs must be set in deployed.json. Run deploy-vaults.ts first.");
-  }
+  const existing = loadDeployedState() ?? {
+    network: env.wsUrl,
+    deployer: wallet.classicAddress,
+    timestamp: new Date().toISOString(),
+    vaultIds: {},
+  };
 
   // 1. Build WASM
   buildWasm();
@@ -133,14 +207,14 @@ async function main(): Promise<void> {
     // 3. Deploy contract
     const contractAddress = await deployContract(xrplClient, wallet, wasmHex);
 
-    // 4. Register vault accounts (vault ledger objects → AccountID stored in contract state)
-    // We need the vault AccountIDs, not just the VaultIDs.
-    // For now we store the deployer's address as vault owner — this needs to be
-    // the actual vault r-address on AlphaNet (extracted from vault metadata).
-    // The VaultID is the ledger index; the vault account is typically the creator's address.
-    // Until vault account resolution is available, we record for manual completion.
-    log("Note: Vault account registration requires resolving VaultID → AccountID.");
-    log("Vault IDs saved. Set VAULT_XRP_ACCOUNT, VAULT_RLUSD_ACCOUNT, VAULT_WBTC_ACCOUNT env vars to register.");
+    // 4. Register vault accounts in contract state (glb:vault0/1/2 ← AccountID).
+    // Vault accounts are r-addresses extracted from VaultCreate metadata by setup-markets.ts.
+    // The preferred full deploy flow is: deploy-controller.ts → setup-markets.ts
+    // (setup-markets creates the vaults AND calls set_vault in one pass).
+    //
+    // This script supports standalone vault registration if you already have vault r-addresses
+    // from a prior run of setup-markets.ts: set VAULT_XRP_ACCOUNT, VAULT_RLUSD_ACCOUNT,
+    // VAULT_WBTC_ACCOUNT and re-run deploy-controller.ts.
 
     const vaultXrpAccount = process.env.VAULT_XRP_ACCOUNT;
     const vaultRlusdAccount = process.env.VAULT_RLUSD_ACCOUNT;
@@ -158,7 +232,7 @@ async function main(): Promise<void> {
       await registerVaultAccount(lendingClient, 1);
       await registerVaultAccount(lendingClient, 2);
     } else {
-      log("Skipping vault registration (VAULT_*_ACCOUNT env vars not set).");
+      log("Vault accounts not provided — skipping registration. Run setup-markets.ts next to create vaults and register them.");
     }
 
     // 5. Save state

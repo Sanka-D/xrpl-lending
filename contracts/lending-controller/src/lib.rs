@@ -51,7 +51,7 @@ use crate::{
     collateral::{handle_deposit_collateral, handle_withdraw_collateral},
     errors::{LendingError, LendingResult},
     health::calculate_health_factor,
-    host::{accept_tx, get_caller, read_state, rollback_tx, write_state, WasmHost, WasmOracle, HostContext},
+    host::{accept_tx, get_caller, read_param_u32, read_param_u64, read_state, rollback_tx, write_state, WasmHost, WasmOracle, HostContext},
     interest::get_actual_debt,
     liquidation::handle_liquidate,
     math::WAD,
@@ -215,8 +215,12 @@ fn load_vault_account(asset_index: u8) -> [u8; 20] {
 /// The caller receives scaled supply shares tracked in contract state.
 #[cfg(target_arch = "wasm32")]
 #[unsafe(no_mangle)]
-pub extern "C" fn supply(asset_id: u32, amount: u64) -> i32 {
+pub extern "C" fn supply() -> i32 {
     let result: LendingResult<()> = (|| {
+        let asset_id = read_param_u32(0);
+        let raw = read_param_u64(1);
+        // Default 1_000_000 drops when no Parameters (Parameters crash node — Bedrock bug).
+        let amount = if raw == 0 { 1_000_000 } else { raw };
         let asset_index = asset_id as u8;
         if (asset_index as usize) >= NUM_V1_MARKETS as usize {
             return Err(LendingError::InvalidAsset);
@@ -239,16 +243,19 @@ pub extern "C" fn supply(asset_id: u32, amount: u64) -> i32 {
     })();
 
     match result {
-        Ok(()) => { accept_tx(); }
-        Err(e) => { rollback_tx(e); }
+        Ok(()) => accept_tx(),
+        Err(e) => rollback_tx(e),
     }
 }
 
 /// Withdraw `shares` (scaled) from the supply pool for `asset_id`.
 #[cfg(target_arch = "wasm32")]
 #[unsafe(no_mangle)]
-pub extern "C" fn withdraw(asset_id: u32, shares: u64) -> i32 {
+pub extern "C" fn withdraw() -> i32 {
     let result: LendingResult<()> = (|| {
+        let asset_id = read_param_u32(0);
+        let raw = read_param_u64(1);
+        let shares = if raw == 0 { 1_000_000 } else { raw };
         let asset_index = asset_id as u8;
         if (asset_index as usize) >= NUM_V1_MARKETS as usize {
             return Err(LendingError::InvalidAsset);
@@ -271,8 +278,8 @@ pub extern "C" fn withdraw(asset_id: u32, shares: u64) -> i32 {
     })();
 
     match result {
-        Ok(()) => { accept_tx(); }
-        Err(e) => { rollback_tx(e); }
+        Ok(()) => accept_tx(),
+        Err(e) => rollback_tx(e),
     }
 }
 
@@ -281,8 +288,11 @@ pub extern "C" fn withdraw(asset_id: u32, shares: u64) -> i32 {
 /// The asset must be attached to the ContractCall transaction.
 #[cfg(target_arch = "wasm32")]
 #[unsafe(no_mangle)]
-pub extern "C" fn deposit_collateral(asset_id: u32, amount: u64) -> i32 {
+pub extern "C" fn deposit_collateral() -> i32 {
     let result: LendingResult<()> = (|| {
+        let asset_id = read_param_u32(0);
+        let raw = read_param_u64(1);
+        let amount = if raw == 0 { 1_000_000 } else { raw };
         let asset_index = asset_id as u8;
         if (asset_index as usize) >= NUM_V1_MARKETS as usize {
             return Err(LendingError::InvalidAsset);
@@ -298,8 +308,8 @@ pub extern "C" fn deposit_collateral(asset_id: u32, amount: u64) -> i32 {
     })();
 
     match result {
-        Ok(()) => { accept_tx(); }
-        Err(e) => { rollback_tx(e); }
+        Ok(()) => accept_tx(),
+        Err(e) => rollback_tx(e),
     }
 }
 
@@ -308,8 +318,11 @@ pub extern "C" fn deposit_collateral(asset_id: u32, amount: u64) -> i32 {
 /// Enforces health factor ≥ 1.0 after withdrawal.
 #[cfg(target_arch = "wasm32")]
 #[unsafe(no_mangle)]
-pub extern "C" fn withdraw_collateral(asset_id: u32, amount: u64) -> i32 {
+pub extern "C" fn withdraw_collateral() -> i32 {
     let result: LendingResult<()> = (|| {
+        let asset_id = read_param_u32(0);
+        let raw = read_param_u64(1);
+        let amount = if raw == 0 { 1_000_000 } else { raw };
         let asset_index = asset_id as u8;
         if (asset_index as usize) >= NUM_V1_MARKETS as usize {
             return Err(LendingError::InvalidAsset);
@@ -330,8 +343,8 @@ pub extern "C" fn withdraw_collateral(asset_id: u32, amount: u64) -> i32 {
     })();
 
     match result {
-        Ok(()) => { accept_tx(); }
-        Err(e) => { rollback_tx(e); }
+        Ok(()) => accept_tx(),
+        Err(e) => rollback_tx(e),
     }
 }
 
@@ -340,8 +353,12 @@ pub extern "C" fn withdraw_collateral(asset_id: u32, amount: u64) -> i32 {
 /// Enforces LTV limits; sends the borrowed asset to the caller.
 #[cfg(target_arch = "wasm32")]
 #[unsafe(no_mangle)]
-pub extern "C" fn borrow(asset_id: u32, amount: u64) -> i32 {
+pub extern "C" fn borrow() -> i32 {
     let result: LendingResult<()> = (|| {
+        let asset_id = read_param_u32(0);
+        let raw = read_param_u64(1);
+        // Default 500_000 drops (~$1.075 @ $2.15/XRP) — safely under 70% LTV of 1M collateral.
+        let amount = if raw == 0 { 500_000 } else { raw };
         let asset_index = asset_id as u8;
         if (asset_index as usize) >= NUM_V1_MARKETS as usize {
             return Err(LendingError::InvalidAsset);
@@ -364,8 +381,8 @@ pub extern "C" fn borrow(asset_id: u32, amount: u64) -> i32 {
     })();
 
     match result {
-        Ok(()) => { accept_tx(); }
-        Err(e) => { rollback_tx(e); }
+        Ok(()) => accept_tx(),
+        Err(e) => rollback_tx(e),
     }
 }
 
@@ -375,8 +392,11 @@ pub extern "C" fn borrow(asset_id: u32, amount: u64) -> i32 {
 /// Excess (overpayment) is refunded to the caller.
 #[cfg(target_arch = "wasm32")]
 #[unsafe(no_mangle)]
-pub extern "C" fn repay(asset_id: u32, amount: u64) -> i32 {
+pub extern "C" fn repay() -> i32 {
     let result: LendingResult<()> = (|| {
+        let asset_id = read_param_u32(0);
+        let raw = read_param_u64(1);
+        let amount = if raw == 0 { 500_000 } else { raw };
         let asset_index = asset_id as u8;
         if (asset_index as usize) >= NUM_V1_MARKETS as usize {
             return Err(LendingError::InvalidAsset);
@@ -399,8 +419,8 @@ pub extern "C" fn repay(asset_id: u32, amount: u64) -> i32 {
     })();
 
     match result {
-        Ok(()) => { accept_tx(); }
-        Err(e) => { rollback_tx(e); }
+        Ok(()) => accept_tx(),
+        Err(e) => rollback_tx(e),
     }
 }
 
@@ -415,13 +435,12 @@ pub extern "C" fn repay(asset_id: u32, amount: u64) -> i32 {
 /// Seized collateral is sent to the caller (liquidator).
 #[cfg(target_arch = "wasm32")]
 #[unsafe(no_mangle)]
-pub extern "C" fn liquidate(
-    borrower_ptr: u32,
-    debt_id: u32,
-    collat_id: u32,
-    amount: u64,
-) -> i32 {
+pub extern "C" fn liquidate() -> i32 {
     let result: LendingResult<()> = (|| {
+        let borrower_ptr = read_param_u32(0);
+        let debt_id = read_param_u32(1);
+        let collat_id = read_param_u32(2);
+        let amount = read_param_u64(3);
         let debt_index = debt_id as u8;
         let col_index = collat_id as u8;
         if (debt_index as usize) >= NUM_V1_MARKETS as usize
@@ -457,8 +476,8 @@ pub extern "C" fn liquidate(
     })();
 
     match result {
-        Ok(()) => { accept_tx(); }
-        Err(e) => { rollback_tx(e); }
+        Ok(()) => accept_tx(),
+        Err(e) => rollback_tx(e),
     }
 }
 
@@ -470,8 +489,9 @@ pub extern "C" fn liquidate(
 /// `asset_id` — 0=XRP, 1=RLUSD, 2=wBTC.
 #[cfg(target_arch = "wasm32")]
 #[unsafe(no_mangle)]
-pub extern "C" fn set_vault(asset_id: u32) -> i32 {
+pub extern "C" fn set_vault() -> i32 {
     let result: LendingResult<()> = (|| {
+        let asset_id = read_param_u32(0);
         let asset_index = asset_id as u8;
         if (asset_index as usize) >= NUM_V1_MARKETS as usize {
             return Err(LendingError::InvalidAsset);
@@ -495,8 +515,111 @@ pub extern "C" fn set_vault(asset_id: u32) -> i32 {
     })();
 
     match result {
-        Ok(()) => { accept_tx(); }
-        Err(e) => { rollback_tx(e); }
+        Ok(()) => accept_tx(),
+        Err(e) => rollback_tx(e),
+    }
+}
+
+// ── Trace helper for probes ───────────────────────────────────────────────────
+
+/// Write i32 return code as "TAG:±NNNNN" to WasmTrace log.
+#[cfg(target_arch = "wasm32")]
+fn probe_trace_i32(tag: u8, val: i32) {
+    let mut buf = [0u8; 14];
+    buf[0] = tag;
+    buf[1] = b':';
+    let (sign, mut u) = if val < 0 { (b'-', (-(val as i64)) as u32) } else { (b'+', val as u32) };
+    buf[2] = sign;
+    let mut digits = [0u8; 10];
+    let mut dlen = 0usize;
+    if u == 0 { digits[0] = b'0'; dlen = 1; }
+    else { while u > 0 { digits[dlen] = b'0' + (u % 10) as u8; dlen += 1; u /= 10; } }
+    // digits are reversed; copy them correctly into buf[3..]
+    for i in 0..dlen { buf[3 + i] = digits[dlen - 1 - i]; }
+    crate::host::trace_raw(&buf[..3 + dlen]);
+}
+
+/// Debug probe A: two-phase test for update_data persistence.
+/// Call 1: reads existing data (trace R:<n>), writes sentinel, ACCEPTS.
+/// Call 2: reads sentinel back — data_ok if persisted, no_data if not.
+/// Always accepts so writes commit to ledger.
+#[cfg(target_arch = "wasm32")]
+#[unsafe(no_mangle)]
+pub extern "C" fn probe_supply_state() -> i32 {
+    // Phase 1: read what's currently in the Contract's Data field
+    let sentinel = [0xDEu8, 0xAD, 0xBE, 0xEF, 0x12, 0x34, 0x56, 0x78];
+    let sf_data: i32 = (7i32 << 16) | 27;  // sfData / Data blob field
+    let mut buf = [0u8; 64];
+    let r_read = crate::host::read_ledger_field(sf_data, &mut buf);
+    crate::host::trace_num_raw(b"R", r_read as i64);  // bytes already in ledger
+
+    if r_read >= 8 && buf[..8] == sentinel {
+        // Sentinel found from previous TX → update_data persistence confirmed ✅
+        crate::host::trace_raw(b"data_ok");
+        return accept_tx();
+    }
+
+    // Phase 2: write sentinel and ALWAYS accept (so write commits to ledger)
+    let r_write = crate::host::write_blob(&sentinel);
+    crate::host::trace_num_raw(b"W", r_write as i64);  // 1=ok, 0=fail
+    crate::host::trace_raw(b"wrote");
+    // Accept regardless — on next call, R should return 8 bytes with our sentinel
+    accept_tx()
+}
+
+/// Debug probe B: test set_data_object_field + get_data_object_field (KV store).
+/// Call 1: tries to write 0xDEADBEEF, reads back, traces results, ACCEPTS always.
+/// Call 2: same — if write succeeded, read should return 0xDEADBEEF.
+#[cfg(target_arch = "wasm32")]
+#[unsafe(no_mangle)]
+pub extern "C" fn probe_collateral() -> i32 {
+    let mut caller = [0u8; 20];
+    let r_get = unsafe { crate::host::get_tx_field_raw((8i32 << 16) | 1, caller.as_mut_ptr(), 20) };
+    probe_trace_i32(b'G', r_get);
+
+    let field = b"t1";
+    let val_bytes = 0xDEADBEEFu32.to_be_bytes();
+
+    // Try to write
+    let r_write = unsafe {
+        crate::host::set_data_object_field_raw(
+            caller.as_ptr(), field.as_ptr(), field.len() as i32,
+            val_bytes.as_ptr(), 4, 2, // STI_UINT32
+        )
+    };
+    probe_trace_i32(b'S', r_write);
+
+    // Read back immediately
+    let mut out = [0u8; 4];
+    let r_read = unsafe {
+        crate::host::get_data_object_field_raw(
+            caller.as_ptr(), field.as_ptr(), field.len() as i32,
+            out.as_mut_ptr(), 4, 2,
+        )
+    };
+    probe_trace_i32(b'R', r_read);
+
+    if r_read == 4 {
+        let v = u32::from_be_bytes(out);
+        probe_trace_i32(b'V', v as i32);
+        crate::host::trace_raw(if v == 0xDEADBEEFu32 { b"kv_ok" } else { b"bad_val" });
+    } else {
+        crate::host::trace_raw(b"kv_fail");
+    }
+    // Always accept to let any successful writes commit
+    accept_tx()
+}
+
+/// Debug probe C: just accepts (oracle prices are hardcoded, this is a pass-through).
+#[cfg(target_arch = "wasm32")]
+#[unsafe(no_mangle)]
+pub extern "C" fn probe_oracle() -> i32 {
+    let ctx = WasmHost;
+    let oracle = WasmOracle;
+    let current_time = ctx.current_time();
+    match get_all_prices(&oracle, current_time) {
+        Ok(_) => accept_tx(),
+        Err(e) => rollback_tx(e),
     }
 }
 
@@ -507,7 +630,8 @@ pub extern "C" fn set_vault(asset_id: u32) -> i32 {
 /// Saturates to u64::MAX for the no-debt case.
 #[cfg(target_arch = "wasm32")]
 #[unsafe(no_mangle)]
-pub extern "C" fn get_health_factor(user_ptr: u32) -> u64 {
+pub extern "C" fn get_health_factor() -> i32 {
+    let user_ptr = read_param_u32(0);
     let user: [u8; 20] = unsafe {
         let ptr = user_ptr as *const u8;
         let mut arr = [0u8; 20];
@@ -537,16 +661,22 @@ pub extern "C" fn get_health_factor(user_ptr: u32) -> u64 {
     let current_time = ctx.current_time();
     let prices = match get_all_prices(&oracle, current_time) {
         Ok(p) => p,
-        Err(e) => { rollback_tx(e); }
+        Err(e) => rollback_tx(e),
     };
 
     let hf = match calculate_health_factor(&actual_pos, &prices, &V1_MARKETS) {
         Ok(h) => h,
-        Err(e) => { rollback_tx(e); }
+        Err(e) => rollback_tx(e),
     };
 
     // Saturate u128 → u64 (u128::MAX → u64::MAX for no-debt case)
-    hf.min(u64::MAX as u128) as u64
+    let hf_u64 = hf.min(u64::MAX as u128) as u64;
+
+    // Expose via set_return_value so query callers can read the blob.
+    let buf = hf_u64.to_le_bytes();
+    crate::host::set_return_value(buf.as_ptr(), buf.len() as u32);
+
+    0 // success
 }
 
 /// Serialize the user's position and write it to WASM memory via `set_return_value`.
@@ -562,7 +692,8 @@ pub extern "C" fn get_health_factor(user_ptr: u32) -> u64 {
 /// The serialised blob is written via the `set_return_value` host function.
 #[cfg(target_arch = "wasm32")]
 #[unsafe(no_mangle)]
-pub extern "C" fn get_user_position(user_ptr: u32) -> u32 {
+pub extern "C" fn get_user_position() -> i32 {
+    let user_ptr = read_param_u32(0);
     let user: [u8; 20] = unsafe {
         let ptr = user_ptr as *const u8;
         let mut arr = [0u8; 20];
@@ -599,7 +730,7 @@ pub extern "C" fn get_user_position(user_ptr: u32) -> u32 {
         offset += 16;
     }
 
-    unsafe { crate::host::set_return_value(buf.as_ptr(), buf.len() as u32) }
+    crate::host::set_return_value(buf.as_ptr(), buf.len() as u32);
 
-    buf.as_ptr() as u32
+    0 // success
 }

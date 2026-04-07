@@ -23,16 +23,24 @@ import { Client, Wallet } from "xrpl";
 import type { SubmittableTransaction, TxResponse } from "xrpl";
 import { LendingClient } from "xrpl-lending-sdk";
 import {
-  loadDeployEnv, loadDeployedState, saveDeployedState,
+  loadDeployEnv, loadDeployedState, loadDeployWallet, saveDeployedState,
   extractCreatedNodeIndex, log, die,
 } from "./shared.js";
 
-// Faucet URL — set to local when using `bedrock node start`
+// Faucet URL — override via FAUCET_URL env var for non-local networks.
+// AlphaNet example: FAUCET_URL=https://alphanet.nerdnest.xyz/faucet
 const FAUCET_URL = process.env.FAUCET_URL ?? "http://localhost:8080/faucet";
 
 // ── Faucet helper ─────────────────────────────────────────────────────────────
 
 async function fundFromFaucet(wallet: Wallet): Promise<void> {
+  if (!process.env.FAUCET_URL && !FAUCET_URL.includes("localhost")) {
+    die(
+      "FAUCET_URL env var must be set when creating issuer accounts on a non-local network.\n" +
+      "Example: FAUCET_URL=https://alphanet.nerdnest.xyz/faucet\n" +
+      "Or provide RLUSD_ISSUER and WBTC_ISSUER to skip faucet calls entirely.",
+    );
+  }
   log(`Funding ${wallet.classicAddress} from faucet...`);
   const res = await fetch(FAUCET_URL, {
     method: "POST",
@@ -149,7 +157,7 @@ async function main(): Promise<void> {
     die("No controllerAddress in deployed.json. Deploy the contract first.");
   }
 
-  const deployer = Wallet.fromSeed(env.deployerSecret);
+  const deployer = loadDeployWallet(env.deployerSecret);
   log("Setup markets", {
     deployer: deployer.classicAddress,
     controller: existing.controllerAddress,

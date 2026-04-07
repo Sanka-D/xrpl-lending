@@ -10,7 +10,10 @@ import type { LendingClient } from "./client";
 
 // ── DIA oracle constants (mirrors Rust state.rs) ────────────────────────────
 
-export const DIA_ORACLE_ACCOUNT = "rP24Lp7bcUHvEW7T7c8xkxtQKKd9fZyra7";
+// LOCAL_ORACLE_ACCOUNT overrides the DIA oracle for local Bedrock testing.
+export const DIA_ORACLE_ACCOUNT = (typeof process !== "undefined" && process.env?.LOCAL_ORACLE_ACCOUNT)
+  ? process.env.LOCAL_ORACLE_ACCOUNT
+  : "rP24Lp7bcUHvEW7T7c8xkxtQKKd9fZyra7";
 export const DIA_DOCUMENT_ID = 42;
 export const MAX_ORACLE_STALENESS = 300; // seconds
 
@@ -71,17 +74,27 @@ interface RawPriceEntry {
   };
 }
 
+/** 20-byte hex-padded representation of a currency ticker (for non-standard tickers). */
+function tickerToHex20(ticker: string): string {
+  return Buffer.from(ticker).toString("hex").padEnd(40, "0").toUpperCase();
+}
+
 function parsePriceDataSeries(
   series: unknown[],
   ticker: string,
 ): { assetPrice: bigint; scale: number } | null {
+  // Non-standard tickers (>3 chars) may be stored as 20-byte hex in the ledger.
+  const tickerHex = ticker.length > 3 ? tickerToHex20(ticker) : null;
   for (const entry of series) {
     const e = entry as RawPriceEntry;
-    if (e?.PriceData?.BaseAsset === ticker && e?.PriceData?.AssetPrice != null) {
-      return {
-        assetPrice: BigInt(e.PriceData.AssetPrice),
-        scale: e.PriceData.Scale ?? -8,
-      };
+    const base = e?.PriceData?.BaseAsset;
+    if (base != null && e?.PriceData?.AssetPrice != null) {
+      if (base === ticker || (tickerHex !== null && base === tickerHex)) {
+        return {
+          assetPrice: BigInt(e.PriceData.AssetPrice),
+          scale: e.PriceData.Scale ?? -8,
+        };
+      }
     }
   }
   return null;
