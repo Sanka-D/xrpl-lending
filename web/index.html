@@ -1,0 +1,1443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Atlas</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;900&display=swap" rel="stylesheet" />
+
+  <style>
+    @font-face {
+      font-family: 'Cravelo';
+      src: url('./cravelo.otf') format('opentype');
+      font-weight: normal;
+      font-style: normal;
+      font-display: swap;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Cravelo', 'Inter', sans-serif;
+      background: #000;
+      color: #e8ecf0;
+      overflow-x: hidden;
+    }
+
+
+    /* Black loading screen */
+    .loader {
+      position: fixed;
+      inset: 0;
+      background: #000;
+      z-index: 9999;
+      transition: opacity 0.8s ease;
+    }
+    .loader.hide {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    /* ── HERO ── */
+    .hero {
+      position: relative;
+      height: 360vh; /* tall for scroll-driven extrusion + zoom */
+    }
+
+    /* Globe pinned to viewport (transitioned via JS based on scroll) */
+    .globe-wrap {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 1;
+      will-change: transform, opacity;
+    }
+
+    #globeViz {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Atlas SVG overlay — positioned by JS from group SVG ratios */
+    .atlas-overlay {
+      position: fixed;
+      left: 50%;
+      transform: translateX(-50%);
+      pointer-events: none;
+      z-index: 10;
+      opacity: 0;
+      transition: opacity 0.6s;
+    }
+    .atlas-overlay.ready { opacity: 1; }
+    .atlas-overlay img {
+      height: 100%;
+      width: auto;
+      display: block;
+      filter: brightness(0) invert(1) opacity(0.35);
+    }
+
+    /* ── Nav bar ── */
+    .nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 24px 40px;
+      z-index: 20;
+      pointer-events: none;
+    }
+
+    .nav-logo {
+      font-family: 'Cravelo', sans-serif;
+      font-size: 3rem;
+      font-weight: normal;
+      letter-spacing: 0.02em;
+      color: #fff;
+      pointer-events: auto;
+    }
+
+    /* ── Giant ATLAS footer ── */
+    .footer-title {
+      position: relative;
+      z-index: 20;
+      background: #000;
+      text-align: center;
+      overflow: hidden;
+      padding-bottom: 0;
+      line-height: 0.85;
+    }
+
+    .footer-title-inner {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 1vw;
+      transform: translateX(-5vw);
+    }
+
+    .big-title {
+      font-family: 'Cravelo', sans-serif;
+      font-size: 57vw;
+      font-weight: normal;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+      color: #fff;
+      -webkit-mask-image: linear-gradient(to bottom, white 40%, transparent 100%);
+      mask-image: linear-gradient(to bottom, white 40%, transparent 100%);
+      opacity: 0.9;
+      /* only show ~60% of the text height, cut off the bottom */
+      max-height: 0.55em;
+      overflow: hidden;
+    }
+
+    /* Mini globe next to ATLAS */
+    .mini-globe-wrap {
+      width: 7vw;
+      height: 7vw;
+      flex-shrink: 0;
+      transform: rotate(-15deg);
+      margin-bottom: 2vw;
+    }
+    #miniGlobe {
+      width: 100%;
+      height: 100%;
+    }
+
+    .nav-btn {
+      padding: 20px 52px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.04);
+      color: #fff;
+      font-family: 'Cravelo', sans-serif;
+      font-size: 1.4rem;
+      font-weight: 500;
+      cursor: pointer;
+      pointer-events: auto;
+      backdrop-filter: blur(12px);
+      transition: all 0.25s;
+    }
+    .nav-btn:hover {
+      background: rgba(255,255,255,0.1);
+      border-color: rgba(255,255,255,0.2);
+    }
+
+    /* ── Stats (bottom-left) ── */
+    .stats-row {
+      position: fixed;
+      bottom: 48px;
+      left: 40px;
+      z-index: 20;
+      display: flex;
+      gap: 56px;
+      opacity: 0;
+      transition: opacity 0.6s;
+    }
+    .stats-row.ready { opacity: 1; }
+
+    .stat-label {
+      font-size: 2rem;
+      font-weight: 500;
+      color: #586878;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+
+    .stat-value {
+      font-family: 'Cravelo', sans-serif;
+      font-size: 2.8rem;
+      font-weight: normal;
+      color: #fff;
+      letter-spacing: -0.02em;
+    }
+    .stat-value .dollar {
+      color: #586878;
+      font-weight: 500;
+    }
+    .stat-value number-flow {
+      font: inherit;
+      color: inherit;
+    }
+
+    /* ── HORIZONTAL SCROLL SECTION ── */
+    .hscroll-section {
+      position: relative;
+      z-index: 20;
+      height: 300vh; /* 1 viewport of vertical scroll per card */
+      background: #060b11;
+    }
+    .hscroll-sticky {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: hidden;
+    }
+    .hscroll-track {
+      display: flex;
+      height: 100vh;
+      width: 300vw; /* 100vw per card */
+      will-change: transform;
+    }
+    .hscroll-panel {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      padding: 0 6vw;
+    }
+    .hscroll-panel.p1 { background: linear-gradient(135deg, #0a1d3a 0%, #1a4f8e 60%, #55c3e9 100%); }
+    .hscroll-panel.p2 { background: linear-gradient(135deg, #0c1f3a 0%, #1e2a78 60%, #3749be 100%); }
+    .hscroll-panel.p3 { background: linear-gradient(135deg, #1a0f2e 0%, #4b1e6e 60%, #d948ae 100%); }
+
+    .hscroll-bigtitle {
+      font-family: 'Cravelo', sans-serif;
+      font-size: 18vw;
+      font-weight: normal;
+      color: rgba(255,255,255,0.92);
+      letter-spacing: -0.02em;
+      line-height: 1;
+      white-space: nowrap;
+      will-change: transform;
+      pointer-events: none;
+    }
+
+    .hscroll-content {
+      position: absolute;
+      bottom: 8vh;
+      left: 6vw;
+      right: 6vw;
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 4vw;
+      z-index: 2;
+    }
+    .hscroll-content-text {
+      max-width: 780px;
+      color: #fff;
+    }
+    .hscroll-content-text p {
+      font-family: 'Cravelo', sans-serif;
+      font-size: 2.4rem;
+      color: rgba(255,255,255,0.92);
+      line-height: 1.35;
+      letter-spacing: -0.01em;
+    }
+    .hscroll-content-icon {
+      width: 140px;
+      height: 140px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.95);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+    }
+    .hscroll-content-icon img {
+      width: 65%;
+      height: 65%;
+      object-fit: contain;
+    }
+
+    .hscroll-counter {
+      position: absolute;
+      top: 8vh;
+      right: 6vw;
+      font-family: 'Cravelo', sans-serif;
+      color: rgba(255,255,255,0.6);
+      font-size: 1rem;
+      letter-spacing: 0.1em;
+      z-index: 2;
+    }
+
+    @media (max-width: 800px) {
+      .hscroll-bigtitle { font-size: 22vw; }
+      .hscroll-content { flex-direction: column; align-items: flex-start; }
+      .hscroll-content-text h3 { font-size: 1.6rem; }
+      .hscroll-content-icon { width: 80px; height: 80px; }
+    }
+
+    /* Linear Modal */
+    .linear-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(125% 125% at 50% 10%, #050505 40%, #1b1b1b 100%);
+      z-index: 9700;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 80px 40px 40px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.4s ease;
+      overflow-y: auto;
+    }
+    .linear-modal-backdrop.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .linear-modal {
+      background: #000;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 24px;
+      width: 100%;
+      max-width: 900px;
+      position: relative;
+      transform: scale(0.92) translateY(50px);
+      opacity: 0;
+      transition: transform 0.55s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.35s ease;
+      overflow: hidden;
+    }
+    .linear-modal-backdrop.open .linear-modal {
+      transform: scale(1) translateY(0);
+      opacity: 1;
+    }
+    .linear-modal-image {
+      width: 60%;
+      margin: 48px auto 24px;
+      height: 240px;
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .linear-modal-image img {
+      width: 50%;
+      max-height: 70%;
+      object-fit: contain;
+      filter: drop-shadow(0 12px 40px rgba(0,0,0,0.5));
+    }
+    .linear-modal-body {
+      padding: 24px 48px 100px;
+    }
+    .linear-modal-title {
+      font-family: 'Cravelo', sans-serif;
+      font-size: 3rem;
+      color: #fff;
+      margin-bottom: 18px;
+      letter-spacing: -0.01em;
+    }
+    .linear-modal-desc {
+      font-family: 'Cravelo', sans-serif;
+      color: #8898a8;
+      font-size: 1.05rem;
+      line-height: 1.7;
+    }
+    .linear-modal-close {
+      position: absolute;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 48px;
+      height: 48px;
+      border-radius: 10px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.08);
+      color: #fff;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      line-height: 1;
+      transition: all 0.2s;
+    }
+    .linear-modal-close:hover {
+      background: rgba(255,255,255,0.14);
+    }
+
+    @media (max-width: 800px) {
+      .cards-grid { grid-template-columns: 1fr; }
+      .cards-section-title { font-size: 2.2rem; }
+      .linear-modal-title { font-size: 2rem; }
+      .linear-modal-body { padding: 18px 24px 100px; }
+      .linear-modal-image { width: 80%; height: 180px; }
+    }
+
+    /* ── ANIMATED BEAM SECTION ── */
+    .beam-section {
+      position: relative;
+      height: 200vh;
+      background: #000;
+      z-index: 20;
+    }
+
+    .beam-inner {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      display: grid;
+      grid-template-columns: minmax(440px, 38vw) 1fr;
+      align-items: center;
+      gap: 5vw;
+      padding: 0 4vw 0 8.5vw;
+    }
+
+    .beam-container {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 1.1 / 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 40px;
+    }
+
+    .beam-grid {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 32px;
+      position: relative;
+      z-index: 2;
+    }
+    .beam-row {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .beam-circle {
+      width: 68px;
+      height: 68px;
+      border-radius: 50%;
+      background: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 14px rgba(255,255,255,0.06), inset 0 0 0 1px rgba(0,0,0,0.06);
+      flex-shrink: 0;
+      overflow: hidden;
+    }
+    .beam-circle.center {
+      width: 96px;
+      height: 96px;
+      box-shadow: 0 0 36px rgba(255, 255, 255, 0.18);
+    }
+    .beam-circle img,
+    .beam-circle svg {
+      width: 70%;
+      height: 70%;
+      object-fit: contain;
+    }
+    .beam-circle.center img,
+    .beam-circle.center svg {
+      width: 75%;
+      height: 75%;
+    }
+
+    .beam-text-side {
+      color: #fff;
+      max-width: 640px;
+      align-self: start;
+      padding-top: 25vh;
+      transform: translateX(5vw);
+    }
+    .beam-text-side h2 {
+      font-family: 'Cravelo', sans-serif;
+      font-size: 5.4rem;
+      line-height: 1.02;
+      margin-bottom: 50px;
+      letter-spacing: -0.015em;
+    }
+    .beam-text-side h2 .line-1 {
+      white-space: nowrap;
+    }
+    .beam-text-side p {
+      font-family: 'Cravelo', sans-serif;
+      color: #8898a8;
+      font-size: 1.95rem;
+      line-height: 1.5;
+    }
+    @media (max-width: 900px) {
+      .beam-inner {
+        grid-template-columns: 1fr;
+        gap: 4vh;
+        padding: 6vh 6vw;
+      }
+      .beam-text-side h2 { font-size: 2.4rem; }
+    }
+
+    /* ── FAQ SECTION ── */
+    .faq-section {
+      position: relative;
+      z-index: 20;
+      background: #000;
+      padding: 140px 6vw 160px;
+    }
+    .faq-inner {
+      display: grid;
+      grid-template-columns: minmax(280px, 32%) 1fr;
+      gap: 6vw;
+      max-width: 1400px;
+      margin: 0 auto;
+      align-items: start;
+    }
+    .faq-title {
+      font-family: 'Cravelo', sans-serif;
+      font-size: 5rem;
+      color: #fff;
+      letter-spacing: -0.01em;
+      line-height: 1;
+      position: sticky;
+      top: 120px;
+    }
+    .faq-list {
+      width: 100%;
+    }
+    .faq-item {
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    .faq-item:first-child {
+      border-top: 1px solid rgba(255,255,255,0.08);
+    }
+    .faq-question {
+      display: flex;
+      align-items: center;
+      gap: 22px;
+      width: 100%;
+      padding: 32px 6px;
+      background: none;
+      border: none;
+      color: #fff;
+      font-family: 'Cravelo', sans-serif;
+      font-size: 1.7rem;
+      text-align: left;
+      cursor: pointer;
+      transition: color 0.2s;
+    }
+    .faq-question:hover {
+      color: #cfd8e0;
+    }
+    .faq-icon {
+      width: 28px;
+      height: 28px;
+      flex-shrink: 0;
+      color: #8898a8;
+      transition: transform 0.3s ease, color 0.2s;
+      margin-left: auto;
+      order: 2;
+    }
+    .faq-item.open .faq-icon {
+      transform: rotate(45deg);
+      color: #fff;
+    }
+    .faq-content {
+      display: grid;
+      grid-template-rows: 0fr;
+      transition: grid-template-rows 0.4s ease;
+    }
+    .faq-item.open .faq-content {
+      grid-template-rows: 1fr;
+    }
+    .faq-content > div {
+      overflow: hidden;
+    }
+    .faq-content p {
+      padding: 0 60px 32px 6px;
+      font-family: 'Cravelo', sans-serif;
+      color: #8898a8;
+      font-size: 1.25rem;
+      line-height: 1.6;
+      max-width: 92%;
+    }
+    @media (max-width: 800px) {
+      .faq-inner { grid-template-columns: 1fr; gap: 32px; }
+      .faq-title { font-size: 3rem; position: static; }
+      .faq-question { font-size: 1.2rem; padding: 22px 4px; }
+      .faq-content p { font-size: 1rem; padding: 0 40px 22px 4px; }
+    }
+
+    /* ── CTA SECTION ── */
+    .cta-section {
+      position: relative;
+      z-index: 20;
+      background: #000;
+      padding: 140px 40px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+    }
+    .cta-section h2 {
+      font-family: 'Cravelo', sans-serif;
+      font-size: 3.6rem;
+      color: #fff;
+      margin-bottom: 16px;
+      letter-spacing: -0.01em;
+    }
+    .cta-section p {
+      font-family: 'Cravelo', sans-serif;
+      color: #8898a8;
+      font-size: 1.2rem;
+      margin-bottom: 36px;
+      max-width: 540px;
+    }
+
+    .cta-buttons {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+    }
+    .gradient-btn {
+      height: 54px;
+      padding: 0 38px;
+      border-radius: 11px;
+      border: 2px solid #656fe2;
+      background: linear-gradient(110deg, #1e2a78, 45%, #3749be, 55%, #1e2a78);
+      background-size: 200% 100%;
+      color: #fff;
+      font-family: 'Cravelo', sans-serif;
+      font-size: 1.1rem;
+      letter-spacing: 0.01em;
+      cursor: pointer;
+      animation: shimmer 4s linear infinite;
+      transition: border-color 0.2s, transform 0.15s;
+    }
+    .gradient-btn:hover {
+      border-color: #fff;
+    }
+    .gradient-btn:active {
+      transform: scale(0.97);
+    }
+    .ghost-btn {
+      height: 54px;
+      padding: 0 32px;
+      border-radius: 11px;
+      border: 1px solid rgba(255,255,255,0.18);
+      background: rgba(255,255,255,0.04);
+      color: #fff;
+      font-family: 'Cravelo', sans-serif;
+      font-size: 1.1rem;
+      cursor: pointer;
+      backdrop-filter: blur(8px);
+      transition: all 0.2s;
+    }
+    .ghost-btn:hover {
+      background: rgba(255,255,255,0.1);
+      border-color: rgba(255,255,255,0.32);
+    }
+    .ghost-btn:active {
+      transform: scale(0.97);
+    }
+    @keyframes shimmer {
+      from { background-position: 200% 0; }
+      to   { background-position: -200% 0; }
+    }
+
+    /* ── MODAL ── */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.65);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      z-index: 9500;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s ease;
+    }
+    .modal-backdrop.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .modal-content {
+      background: #0c1218;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 18px;
+      padding: 56px 56px 48px;
+      width: 90%;
+      max-width: 680px;
+      box-shadow: 0 40px 120px rgba(0,0,0,0.7);
+      transform: scale(0.92) translateY(24px);
+      opacity: 0;
+      transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease;
+    }
+    .modal-backdrop.open .modal-content {
+      transform: scale(1) translateY(0);
+      opacity: 1;
+    }
+    .modal-header h3 {
+      font-family: 'Cravelo', sans-serif;
+      font-size: 2.4rem;
+      color: #fff;
+      margin-bottom: 10px;
+      letter-spacing: -0.01em;
+    }
+    .modal-header p {
+      font-family: 'Cravelo', sans-serif;
+      color: #586878;
+      font-size: 1.1rem;
+      margin-bottom: 36px;
+      line-height: 1.5;
+    }
+    .modal-form {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .modal-form label {
+      font-family: 'Cravelo', sans-serif;
+      font-size: 1rem;
+      color: #8898a8;
+      margin-bottom: 8px;
+      display: block;
+    }
+    .modal-form input,
+    .modal-form textarea {
+      width: 100%;
+      height: 54px;
+      padding: 14px 18px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.03);
+      color: #fff;
+      font-family: 'Cravelo', sans-serif;
+      font-size: 1.1rem;
+      outline: none;
+      transition: border-color 0.2s;
+      resize: none;
+    }
+    .modal-form textarea {
+      height: auto;
+      min-height: 110px;
+      line-height: 1.4;
+    }
+    .modal-form input:focus,
+    .modal-form textarea:focus {
+      border-color: #55c3e9;
+    }
+    .modal-submit {
+      width: 100%;
+      margin-top: 14px;
+      padding: 18px;
+      background: #fff;
+      color: #060b11;
+      border: none;
+      border-radius: 10px;
+      font-family: 'Cravelo', sans-serif;
+      font-size: 1.15rem;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .modal-submit:hover {
+      background: #e8ecf0;
+    }
+    .modal-close {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: transparent;
+      color: #586878;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+    .modal-close:hover {
+      color: #fff;
+      border-color: rgba(255,255,255,0.3);
+    }
+
+    /* ── FEATURES ── */
+    .features {
+      position: relative;
+      z-index: 20;
+      background: #060b11;
+      padding: 120px 40px;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 28px;
+    }
+
+    .feature-card {
+      background: #0c1218;
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 16px;
+      padding: 36px 28px;
+      opacity: 0;
+      transform: translateY(30px);
+      transition: all 0.5s ease-out;
+    }
+    .feature-card.vis { opacity: 1; transform: none; }
+    .feature-card:hover { border-color: rgba(85,195,233,0.2); }
+
+    .feature-card h3 { font-size: 1.15rem; margin-bottom: 10px; }
+    .feature-card p  { color: #586878; line-height: 1.6; font-size: 0.92rem; }
+
+    @media (max-width: 768px) {
+      .feature-grid { grid-template-columns: 1fr; }
+      .nav { padding: 16px 20px; }
+      .stats-row { left: 20px; bottom: 32px; gap: 32px; }
+      .stat-value { font-size: 1.6rem; }
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="loader" id="loader"></div>
+
+  <section class="hero">
+    <div class="globe-wrap">
+      <div id="globeViz"></div>
+    </div>
+  </section>
+
+  <!-- Atlas overlay (fixed, fades in once globe is ready) -->
+  <div class="atlas-overlay" id="atlas">
+    <img src="./atlas.svg" alt="Atlas" />
+  </div>
+
+  <nav class="nav">
+    <div class="nav-logo">ATLAS</div>
+    <a href="http://localhost:3001/markets" class="nav-btn" style="text-decoration:none">Launch App</a>
+  </nav>
+
+
+  <div class="stats-row" id="statsRow">
+    <div class="stat-block">
+      <div class="stat-label">Deposits</div>
+      <div class="stat-value"><span class="dollar">$</span><number-flow id="depositCount" value="0"></number-flow></div>
+    </div>
+    <div class="stat-block">
+      <div class="stat-label">Loans</div>
+      <div class="stat-value"><span class="dollar">$</span><number-flow id="loanCount" value="0"></number-flow></div>
+    </div>
+  </div>
+
+  <section class="beam-section">
+    <div class="beam-inner">
+      <div class="beam-container" id="beamContainer">
+        <div class="beam-grid">
+          <div class="beam-row">
+            <div class="beam-circle" id="b1"><img src="./logos/rlusd.webp" alt="RLUSD"/></div>
+            <div class="beam-circle" id="b5"><img src="./logos/xrp.png" alt="XRP"/></div>
+          </div>
+          <div class="beam-row">
+            <div class="beam-circle" id="b2"><img src="./logos/eth.svg" alt="ETH"/></div>
+            <div class="beam-circle center" id="bC"><img src="./logos/globe.svg" alt="Atlas"/></div>
+            <div class="beam-circle" id="b6"><img src="./logos/btc.svg" alt="BTC"/></div>
+          </div>
+          <div class="beam-row">
+            <div class="beam-circle" id="b3"><img src="./logos/ondo.png" alt="ONDO"/></div>
+            <div class="beam-circle" id="b7"><img src="./logos/usdc_logo.png" alt="USDC"/></div>
+          </div>
+        </div>
+      </div>
+      <div class="beam-text-side">
+        <h2><span class="line-1">Permissionless Lending,</span><br/>Native to XRPL</h2>
+        <p>Atlas brings core DeFi primitives, lending, borrowing, and liquidation, to the XRP Ledger. Permissionless markets, on-chain settlement, sub-second finality. Currently in active development.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="hscroll-section" id="hscrollSection">
+    <div class="hscroll-sticky">
+      <ul class="hscroll-track" id="hscrollTrack">
+        <li class="hscroll-panel p1">
+          <h2 class="hscroll-bigtitle">PERMISSIONLESS</h2>
+          <div class="hscroll-counter">01 / 03</div>
+          <div class="hscroll-content">
+            <div class="hscroll-content-text">
+              <p>Spin up isolated lending markets with custom collateral, oracle, and risk parameters. No governance, no fees, no gatekeepers. Atlas brings permissionless lending to XRPL.</p>
+            </div>
+            <div class="hscroll-content-icon"><img src="./logos/globe.svg" alt=""/></div>
+          </div>
+        </li>
+        <li class="hscroll-panel p2">
+          <h2 class="hscroll-bigtitle">NATIVE</h2>
+          <div class="hscroll-counter">02 / 03</div>
+          <div class="hscroll-content">
+            <div class="hscroll-content-text">
+              <p>Built directly on the XRP Ledger using its new smart contract layer. Lower fees, faster finality, and seamless access to multi-asset liquidity from day one.</p>
+            </div>
+            <div class="hscroll-content-icon"><img src="./logos/xrp.png" alt=""/></div>
+          </div>
+        </li>
+        <li class="hscroll-panel p3">
+          <h2 class="hscroll-bigtitle">CROSS-ASSET</h2>
+          <div class="hscroll-counter">03 / 03</div>
+          <div class="hscroll-content">
+            <div class="hscroll-content-text">
+              <p>Borrow against XRP, RLUSD, ETH, BTC, USDC, ONDO and more from a single unified interface. Compare yields, manage positions, and rebalance instantly across collateral types.</p>
+            </div>
+            <div class="hscroll-content-icon"><img src="./logos/btc.svg" alt=""/></div>
+          </div>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="cta-section">
+    <h2>Be First on XRPL</h2>
+    <p>Atlas is the first permissionless lending protocol native to the XRP Ledger. Currently in active development.</p>
+    <div class="cta-buttons">
+      <a href="http://localhost:3001/markets" class="gradient-btn" style="text-decoration:none;display:inline-flex;align-items:center">Launch App</a>
+      <button class="ghost-btn" id="openModal">Contact me</button>
+    </div>
+  </section>
+
+  <!-- CONTACT MODAL -->
+  <div class="modal-backdrop" id="modalBackdrop">
+    <div class="modal-content" style="position: relative;">
+      <button class="modal-close" id="closeModal" aria-label="Close">×</button>
+      <div class="modal-header">
+        <h3>Contact me</h3>
+        <p>Drop your details and I'll get back to you about Atlas, partnerships, or anything else.</p>
+      </div>
+      <form class="modal-form" id="contactForm">
+        <div>
+          <label for="modalName">Name</label>
+          <input id="modalName" type="text" placeholder="Satoshi Nakamoto" required/>
+        </div>
+        <div>
+          <label for="modalEmail">Email</label>
+          <input id="modalEmail" type="email" placeholder="you@example.com" required/>
+        </div>
+        <div>
+          <label for="modalMessage">Message</label>
+          <textarea id="modalMessage" rows="4" placeholder="What's on your mind?" required></textarea>
+        </div>
+        <button type="submit" class="modal-submit">Send message</button>
+      </form>
+    </div>
+  </div>
+
+  <section class="faq-section">
+    <div class="faq-inner">
+      <h2 class="faq-title">FAQ</h2>
+      <div class="faq-list" id="faqList">
+      <div class="faq-item">
+        <button class="faq-question">
+          <svg class="faq-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          What is Atlas?
+        </button>
+        <div class="faq-content"><div><p>Atlas is a permissionless lending protocol built natively on the XRP Ledger. Anyone can create isolated lending markets with custom collateral, oracles, and risk parameters. No governance, no fees, no gatekeepers.</p></div></div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-question">
+          <svg class="faq-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Why XRPL?
+        </button>
+        <div class="faq-content"><div><p>Smart contracts are arriving on the XRP Ledger, opening the door to a new generation of DeFi primitives. Atlas is positioned to be one of the first permissionless lending protocols on XRPL, leveraging native settlement, low fees, and direct access to XRP and RLUSD liquidity.</p></div></div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-question">
+          <svg class="faq-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Which assets are supported?
+        </button>
+        <div class="faq-content"><div><p>Atlas will support every major asset on XRPL: XRP, RLUSD, ETH, BTC, USDC, ONDO and more. Because markets are permissionless, anyone can deploy a market for any asset pair with the oracle and risk model of their choice.</p></div></div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-question">
+          <svg class="faq-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          When does Atlas launch?
+        </button>
+        <div class="faq-content"><div><p>Atlas is in active development alongside the XRPL smart contract rollout. We're targeting a launch as soon as the core infrastructure is production-ready. Use the contact form to stay in the loop or get involved.</p></div></div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-question">
+          <svg class="faq-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          How is Atlas different from other lending protocols?
+        </button>
+        <div class="faq-content"><div><p>Most lending protocols on EVM chains are governed pools with curated assets. Atlas takes a different approach: isolated, immutable, permissionless markets on a chain that has never had on-chain lending. Combined with XRPL's low fees and fast finality, this unlocks designs that simply weren't possible before.</p></div></div>
+      </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="footer-title">
+    <div class="footer-title-inner">
+      <div class="big-title">ATLAS</div>
+      <div class="mini-globe-wrap">
+        <div id="miniGlobe"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- globe.gl (global script) THEN module script -->
+  <script src="https://cdn.jsdelivr.net/npm/globe.gl"></script>
+
+  <script type="module">
+    import * as THREE from 'https://esm.sh/three';
+    import 'https://esm.sh/number-flow';
+
+    // ── Globe ──
+    const el = document.getElementById('globeViz');
+
+    const world = new Globe(el, { animateIn: false, rendererConfig: { antialias: true, alpha: true } })
+      .backgroundColor('rgba(0,0,0,0)')
+      .showAtmosphere(true)
+      .atmosphereColor('#55c3e9')
+      .atmosphereAltitude(0.18)
+      .globeImageUrl('https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-blue-marble.jpg')
+      .bumpImageUrl('https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-topology.png')
+      .polygonCapColor(() => 'rgba(255, 255, 255, 0)')
+      .polygonSideColor(() => 'rgba(255, 255, 255, 0)')
+      .polygonStrokeColor(() => 'rgba(255, 255, 255, 0)')
+      .polygonsTransitionDuration(0);
+
+    world.controls().autoRotate = true;
+    world.controls().autoRotateSpeed = 0.6;
+    world.controls().enableZoom = false;
+    world.controls().enablePan = false;
+    world.controls().enableRotate = true;
+
+    world.pointOfView({ lat: 25, lng: 0, altitude: 2.8 });
+
+    // ── Position Atlas + Globe from group SVG ratios ──
+    // group SVG: 696×1116, circle center (348, 347), diameter 695
+    // Atlas starts at y≈503, height 613
+    const GROUP = {
+      circleDiameter: 695,
+      circleCenterY: 347,
+      atlasTopY: 503,
+      atlasHeight: 613,
+    };
+    const ATLAS_HEIGHT_RATIO = GROUP.atlasHeight / GROUP.circleDiameter;  // 0.882
+    const ATLAS_OFFSET_RATIO = (GROUP.atlasTopY - GROUP.circleCenterY) / GROUP.circleDiameter; // 0.224
+    // Actual rendered globe is smaller than the group SVG circle, so it fits within atlas's arms
+    const GLOBE_TO_CIRCLE_RATIO = 0.865;
+    // Shift globe down by a fraction of its diameter to nestle into atlas's arms
+    const GLOBE_DOWN_SHIFT = 0.06;
+
+    let globeBaseTranslateY = 0;
+
+    function positionAtlas() {
+      const camera = world.camera();
+      const vh = window.innerHeight;
+
+      // Globe center + radius in canvas coords (before any transform)
+      const center = new THREE.Vector3(0, 0, 0).project(camera);
+      const topPt  = new THREE.Vector3(0, world.getGlobeRadius(), 0).project(camera);
+      const canvasCenterY = (-center.y + 1) / 2 * vh;
+      const canvasTopY    = (-topPt.y + 1) / 2 * vh;
+      const screenDiameter = (canvasCenterY - canvasTopY) * 2;
+
+      // Atlas is sized as if the group SVG circle were the actual reference (slightly larger than the rendered globe)
+      const intendedDiameter = screenDiameter / GLOBE_TO_CIRCLE_RATIO;
+
+      // Atlas: anchor bottom to viewport bottom
+      const atlasHeight    = ATLAS_HEIGHT_RATIO * intendedDiameter;
+      const atlasTopTarget = vh - atlasHeight;
+
+      // Globe center must sit at: atlasTop - offset (above atlas shoulders), shifted down a bit
+      const globeOffset       = ATLAS_OFFSET_RATIO * intendedDiameter;
+      const globeCenterTarget = atlasTopTarget - globeOffset + (GLOBE_DOWN_SHIFT * screenDiameter);
+
+      // Shift the whole globe canvas so its center lands at the target Y
+      globeBaseTranslateY = globeCenterTarget - canvasCenterY;
+      document.querySelector('.globe-wrap').style.transform = `translateY(${globeBaseTranslateY}px)`;
+
+      // Atlas fixed to bottom
+      const atlasEl = document.getElementById('atlas');
+      atlasEl.style.top    = 'auto';
+      atlasEl.style.bottom = '0px';
+      atlasEl.style.height = atlasHeight + 'px';
+    }
+
+    // ── Mini globe (3D, tilted left) ──
+    const miniEl = document.getElementById('miniGlobe');
+    const mini = new Globe(miniEl, { animateIn: false, rendererConfig: { antialias: true, alpha: true } })
+      .backgroundColor('rgba(0,0,0,0)')
+      .showAtmosphere(true)
+      .atmosphereColor('#55c3e9')
+      .atmosphereAltitude(0.15)
+      .globeImageUrl('https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-blue-marble.jpg')
+      .bumpImageUrl('https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-topology.png');
+
+    mini.controls().autoRotate = true;
+    mini.controls().autoRotateSpeed = 1.2;
+    mini.controls().enableZoom = false;
+    mini.controls().enablePan = false;
+    mini.controls().enableRotate = false;
+    mini.pointOfView({ lat: 30, lng: 0, altitude: 2.2 });
+
+    // Show overlays once globe is loaded
+    world.onGlobeReady(() => {
+      positionAtlas();
+      // Fade out black loader, then reveal UI
+      document.getElementById('loader').classList.add('hide');
+      setTimeout(() => {
+        document.getElementById('atlas').classList.add('ready');
+        document.getElementById('statsRow').classList.add('ready');
+
+        // NumberFlow count-up animation: must initialize at 0 first, THEN update to target on next frame
+        const dep = document.getElementById('depositCount');
+        const lon = document.getElementById('loanCount');
+        const fmt = { useGrouping: true, maximumFractionDigits: 0 };
+        const slowTiming = { duration: 1600, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' };
+        dep.format = fmt; dep.locales = 'en-US'; dep.transformTiming = slowTiming; dep.spinTiming = slowTiming;
+        lon.format = fmt; lon.locales = 'en-US'; lon.transformTiming = slowTiming; lon.spinTiming = slowTiming;
+        dep.update(0);
+        lon.update(0);
+        requestAnimationFrame(() => {
+          setTimeout(() => {
+            dep.update(1023788);
+            lon.update(344509);
+          }, 200);
+        });
+      }, 400);
+    });
+
+    window.addEventListener('resize', positionAtlas);
+
+    // ── Clouds ──
+    const CLOUDS_URL = 'https://cdn.jsdelivr.net/npm/globe.gl/example/clouds/clouds.png';
+
+    new THREE.TextureLoader().load(CLOUDS_URL, tex => {
+      const clouds = new THREE.Mesh(
+        new THREE.SphereGeometry(world.getGlobeRadius() * 1.004, 75, 75),
+        new THREE.MeshPhongMaterial({ map: tex, transparent: true, opacity: 0.45 })
+      );
+      world.scene().add(clouds);
+      (function spin() {
+        clouds.rotation.y -= 0.006 * Math.PI / 180;
+        requestAnimationFrame(spin);
+      })();
+    });
+
+    // ── Countries GeoJSON ──
+    let features = [];
+    fetch('https://cdn.jsdelivr.net/npm/globe.gl/example/datasets/ne_110m_admin_0_countries.geojson')
+      .then(r => r.json())
+      .then(geo => {
+        features = geo.features.filter(d => d.properties.ISO_A2 !== 'AQ');
+        world.polygonsData(features);
+        world.polygonAltitude(0.006);
+      });
+
+    // ── Scroll-driven extrusion ──
+    let lastProgress = -1;
+
+    window.addEventListener('scroll', () => {
+      const vh = window.innerHeight;
+      const y  = window.scrollY;
+
+      // progress 0→1 — starts after ~1 viewport, spread over 2.4 viewports for more zoom room
+      const progress = Math.min(1, Math.max(0, (y - vh * 0.8) / (vh * 2.4)));
+
+      if (features.length && Math.abs(progress - lastProgress) > 0.004) {
+        lastProgress = progress;
+
+        // Altitude: flat → extruded
+        world.polygonAltitude(feat => {
+          const pop = +feat.properties.POP_EST;
+          const target = Math.max(0.1, Math.sqrt(pop) * 7e-5);
+          return 0.006 + (target - 0.006) * progress;
+        });
+
+        // Colors: transparent → white/grey léger
+        const capA   = (progress * 0.45).toFixed(3);
+        const sideA  = (progress * 0.12).toFixed(3);
+        const strokeA = (progress * 0.25).toFixed(3);
+        world.polygonCapColor(() => `rgba(220, 228, 235, ${capA})`);
+        world.polygonSideColor(() => `rgba(200, 212, 225, ${sideA})`);
+        world.polygonStrokeColor(() => `rgba(235, 240, 245, ${strokeA})`);
+      }
+
+      // Atlas fade: fully gone by progress = 0.55 (a bit before 2/3)
+      const atlasFade = Math.max(0, 1 - progress / 0.55);
+      document.getElementById('atlas').style.opacity = atlasFade;
+      document.getElementById('statsRow').style.opacity = atlasFade;
+
+      // Globe zoom: kicks in once extrusion is mostly done (progress > 0.6), grows + recenters
+      const zoomProgress = Math.min(1, Math.max(0, (progress - 0.6) / 0.4));
+      const eased = zoomProgress * zoomProgress * (3 - 2 * zoomProgress); // smoothstep
+      const currentTranslateY = globeBaseTranslateY * (1 - eased);
+      const currentScale = 1 + eased * 0.7;
+      document.querySelector('.globe-wrap').style.transform =
+        `translateY(${currentTranslateY}px) scale(${currentScale})`;
+
+      // Fade out the globe completely as we leave the hero
+      const heroEnd = vh * 3.6;
+      const globeFade = Math.max(0, Math.min(1, 1 - (y - heroEnd * 0.88) / (heroEnd * 0.12)));
+      document.querySelector('.globe-wrap').style.opacity = globeFade;
+
+      // speed up rotation with extrusion
+      world.controls().autoRotateSpeed = 0.6 + progress * 2;
+    }, { passive: true });
+
+    // ── ANIMATED BEAMS ──
+    class AnimatedBeam {
+      constructor(opts) {
+        Object.assign(this, opts);
+        this.id = 'beam-' + Math.random().toString(36).slice(2, 9);
+        this.svgNS = 'http://www.w3.org/2000/svg';
+        this.create();
+        this.update();
+        this.animate();
+        new ResizeObserver(() => this.update()).observe(this.container);
+        window.addEventListener('resize', () => this.update());
+      }
+
+      create() {
+        const ns = this.svgNS;
+        this.svg = document.createElementNS(ns, 'svg');
+        this.svg.setAttribute('fill', 'none');
+        Object.assign(this.svg.style, {
+          position: 'absolute', top: '0', left: '0',
+          width: '100%', height: '100%', pointerEvents: 'none', zIndex: '1'
+        });
+
+        const defs = document.createElementNS(ns, 'defs');
+        this.grad = document.createElementNS(ns, 'linearGradient');
+        this.grad.setAttribute('id', this.id);
+        this.grad.setAttribute('gradientUnits', 'userSpaceOnUse');
+
+        // 5-stop gradient: comet effect
+        const start = this.gradientStart || '#55c3e9';
+        const stop  = this.gradientStop  || '#ffffff';
+        const stops = [
+          { o: '0%',    c: start, op: '0' },
+          { o: '32.5%', c: start, op: '1' },
+          { o: '50%',   c: stop,  op: '1' },
+          { o: '67.5%', c: stop,  op: '1' },
+          { o: '100%',  c: stop,  op: '0' },
+        ];
+        stops.forEach(s => {
+          const el = document.createElementNS(ns, 'stop');
+          el.setAttribute('offset', s.o);
+          el.setAttribute('stop-color', s.c);
+          el.setAttribute('stop-opacity', s.op);
+          this.grad.appendChild(el);
+        });
+        defs.appendChild(this.grad);
+        this.svg.appendChild(defs);
+
+        // Static base path (faint dotted)
+        this.basePath = document.createElementNS(ns, 'path');
+        this.basePath.setAttribute('stroke', 'rgba(255,255,255,0.15)');
+        this.basePath.setAttribute('stroke-width', '1.5');
+        this.basePath.setAttribute('stroke-dasharray', '4 4');
+        this.basePath.setAttribute('fill', 'none');
+        this.svg.appendChild(this.basePath);
+
+        // Animated gradient path
+        this.path = document.createElementNS(ns, 'path');
+        this.path.setAttribute('stroke', `url(#${this.id})`);
+        this.path.setAttribute('stroke-width', '2');
+        this.path.setAttribute('stroke-dasharray', '4 4');
+        this.path.setAttribute('stroke-linecap', 'round');
+        this.path.setAttribute('fill', 'none');
+        this.svg.appendChild(this.path);
+
+        this.container.appendChild(this.svg);
+      }
+
+      update() {
+        const cRect = this.container.getBoundingClientRect();
+        const fRect = this.from.getBoundingClientRect();
+        const tRect = this.to.getBoundingClientRect();
+
+        this.svgWidth  = cRect.width;
+        this.svgHeight = cRect.height;
+        this.svg.setAttribute('viewBox', `0 0 ${this.svgWidth} ${this.svgHeight}`);
+
+        const sx = fRect.left - cRect.left + fRect.width / 2;
+        const sy = fRect.top  - cRect.top  + fRect.height / 2 + (this.startYOffset || 0);
+        const ex = tRect.left - cRect.left + tRect.width / 2;
+        const ey = tRect.top  - cRect.top  + tRect.height / 2 + (this.endYOffset || 0);
+
+        const cpx = (sx + ex) / 2;
+        const cpy = (sy + ey) / 2 - (this.curvature || 0);
+        const d = `M ${sx},${sy} Q ${cpx},${cpy} ${ex},${ey}`;
+        this.basePath.setAttribute('d', d);
+        this.path.setAttribute('d', d);
+      }
+
+      animate() {
+        const dur = (this.duration || 5) * 1000;
+        const delay = (this.delay || 0) * 1000;
+        const startTime = performance.now() + delay;
+
+        const tick = (now) => {
+          let t = ((now - startTime) % dur) / dur;
+          if (t < 0) t = 0;
+          if (this.reverse) t = 1 - t;
+
+          // Slide gradient bbox along the svg width
+          const offset = -this.svgWidth + 2 * this.svgWidth * t;
+          this.grad.setAttribute('x1', offset);
+          this.grad.setAttribute('x2', offset + this.svgWidth);
+          this.grad.setAttribute('y1', '0');
+          this.grad.setAttribute('y2', '0');
+
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }
+    }
+
+    // Init beams
+    function initBeams() {
+      const $ = id => document.getElementById(id);
+      const container = $('beamContainer');
+      const center = $('bC');
+      const beams = [
+        { from: $('b1'), curvature: -75, endYOffset: -10, gradientStart: '#55c3e9', gradientStop: '#7ad7f0' },
+        { from: $('b2'), curvature: 0,   endYOffset: 0,   gradientStart: '#d948ae', gradientStop: '#5b60ff' },
+        { from: $('b3'), curvature: 75,  endYOffset: 10,  gradientStart: '#55c3e9', gradientStop: '#7ad7f0' },
+        { from: $('b5'), curvature: -75, endYOffset: -10, reverse: true, gradientStart: '#48b0d9', gradientStop: '#67aeff' },
+        { from: $('b6'), curvature: 0,   endYOffset: 0,   reverse: true, gradientStart: '#02c77b', gradientStop: '#4fcc5d' },
+        { from: $('b7'), curvature: 75,  endYOffset: 10,  reverse: true, gradientStart: '#48b0d9', gradientStop: '#67aeff' },
+      ];
+      beams.forEach((b, i) => new AnimatedBeam({
+        container, to: center, duration: 4 + i * 0.3, delay: i * 0.4, ...b
+      }));
+    }
+    // Wait for layout to settle
+    requestAnimationFrame(() => requestAnimationFrame(initBeams));
+
+    // ── Horizontal Scroll Section ──
+    (function horizontalScrollSetup() {
+      const section = document.getElementById('hscrollSection');
+      const track   = document.getElementById('hscrollTrack');
+      const titles  = section.querySelectorAll('.hscroll-bigtitle');
+      if (!section || !track) return;
+      const numCards = track.children.length;
+
+      function tick() {
+        const rect = section.getBoundingClientRect();
+        const vh = window.innerHeight;
+        const totalScroll = section.offsetHeight - vh;
+        let progress = -rect.top / totalScroll;
+        progress = Math.max(0, Math.min(1, progress));
+
+        const translateX = -progress * (numCards - 1) * 100;
+        track.style.transform = `translateX(${translateX}vw)`;
+
+        // Per-title parallax: each title slides from +600 to -600 over its segment
+        const segLen = 1 / numCards;
+        titles.forEach((title, i) => {
+          const segStart = i * segLen;
+          const segEnd   = (i + 1) * segLen;
+          let local = (progress - segStart) / (segEnd - segStart);
+          local = Math.max(-0.5, Math.min(1.5, local));
+          const x = 600 - local * 1200;
+          title.style.transform = `translateX(${x}px)`;
+        });
+      }
+
+      window.addEventListener('scroll', tick, { passive: true });
+      window.addEventListener('resize', tick);
+      tick();
+    })();
+
+    // ── FAQ Accordion ──
+    document.querySelectorAll('#faqList .faq-item').forEach(item => {
+      item.querySelector('.faq-question').addEventListener('click', () => {
+        const isOpen = item.classList.contains('open');
+        // Close all
+        document.querySelectorAll('#faqList .faq-item.open').forEach(o => o.classList.remove('open'));
+        if (!isOpen) item.classList.add('open');
+      });
+    });
+
+    // ── Contact Modal ──
+    (function modalSetup() {
+      const backdrop = document.getElementById('modalBackdrop');
+      const openBtn  = document.getElementById('openModal');
+      const closeBtn = document.getElementById('closeModal');
+      const form     = document.getElementById('contactForm');
+
+      const open  = () => { backdrop.classList.add('open'); document.body.style.overflow = 'hidden'; };
+      const close = () => { backdrop.classList.remove('open'); document.body.style.overflow = ''; };
+
+      openBtn.addEventListener('click', open);
+      closeBtn.addEventListener('click', close);
+      backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+      document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+
+      form.addEventListener('submit', e => {
+        e.preventDefault();
+        const name    = document.getElementById('modalName').value;
+        const email   = document.getElementById('modalEmail').value;
+        const message = document.getElementById('modalMessage').value;
+        console.log('Contact form:', { name, email, message });
+        close();
+      });
+    })();
+
+    // ── Feature cards reveal ──
+    const obs = new IntersectionObserver(entries => {
+      entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('vis'); });
+    }, { threshold: 0.15 });
+    document.querySelectorAll('.feature-card').forEach(c => obs.observe(c));
+  </script>
+
+</body>
+</html>
